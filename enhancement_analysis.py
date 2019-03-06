@@ -678,55 +678,63 @@ def calib556_3peaks(Yb_spectra,method,plot=False,verbose=False):
     isoshifts = np.array([Yb_176,0,Yb_172])
     slope_guess = (isoshifts[-1]-isoshifts[0])/(xmeans[-1]-xmeans[0])
     if method == 1: #Fit y=shifts, x=means to a line y=mx
-        params_l,errors_l,resid_l = fitLine0(xmeans,isoshifts,slope_guess,plot,verbose)
+        params_l,errors_l,resid_l = fitLine0(xmeans,isoshifts,slope_guess,plot=plot,verbose=verbose)
         slope = params_l[0]
         intercept = 0
     elif method == 2: #Fit y=shifts, x=means to a line y=mx+b
-        params_l,errors_l,resid_l = fitLine(xmeans,isoshifts,[slope_guess,0],plot,verbose)
+        params_l,errors_l,resid_l = fitLine(xmeans,isoshifts,[slope_guess,0],plot=plot,verbose=verbose)
         slope = params_l[0]
         intercept = params_l[1]
     elif method == 3: #Fit y=means, x=shifts, yerr=mean error to a line y=mx+b, then invert. Do this to incorporate error in mean position
-        params_l,errors_l,resid_l = fitInvertedLine(xmeans,isoshifts,[slope_guess,0],plot,verbose)
+        params_l,errors_l,resid_l = fitInvertedLine(xmeans,isoshifts,[slope_guess,0],xerrs,plot,verbose)
         slope = params_l[0]
         intercept = params_l[1]
+    #Calculate calibrated frequencies
     freq_calib = x_shift * slope + intercept
     means_calib = xmeans * slope + intercept
-    return [freq_calib,means_calib,resid_l]
+    # We actually don't want the fit residuals, we want the detuning deviations!
+    detuning_176 = means_calib[0] - means_calib[1]
+    detuning_172 = means_calib[2] - means_calib[1]
+    resid_detuning = [detuning_176-Yb_176,detuning_172-Yb_172]
+    return [freq_calib,means_calib,resid_detuning]
 
-def calib556_array(Yb_array,method,compare=[],method=1,plot=False,verbose=False):
+def calib556_array(Yb_array,method,compare=[],plot=False,verbose=False):
     freq_calib = []
     means_calib = []
-    resid_calib = []
+    resid_detuning_calib = []
     xresid_flat = []
-    xticks = [0,1,2]
 
     plt.figure(10)
     plt.title('Fit Residuals')
-    plt.plot(xticks,np.zeros(len(xticks)),linestyle='--')
-    xlabel = ['176Yb','174Yb','172Yb']
+    xticks = [0,1]
+    plt.plot(xticks,np.zeros(len(xticks)),linestyle='--',color='black')
+    xlabel = ['176Yb','172Yb']
     plt.xticks(xticks,xlabel)
+    plt.ylabel('Deviation from Actual Shift (MHz)')
+    plt.xlabel('Yb Isotope Detuning from 174Yb')
 
     for Yb in Yb_array:
-        freq,means,residuals = calib556_3peaks(Yb,method,plot,verbose)
+        freq,means,detunings = calib556_3peaks(Yb,method,plot,verbose)
         freq_calib.append(freq)
         means_calib.append(means)
-        resid_calib.append(residuals)
+        resid_detuning_calib.append(detunings)
         xresid_flat.extend(xticks)
-    resid_calib_flat = np.array(resid_calib).flatten()
+    resid_calib_flat = np.array(resid_detuning_calib).flatten()
     xticks_flat = np.array(xresid_flat)
 
     plt.figure(10)
-    plt.plot(xticks_flat,resid_calib_flat,marker='o',label='Calibrated',linestyle='None')
-    
+    plt.plot(xticks_flat,resid_calib_flat,marker='o',label='Calibrated Method {}'.format(method),linestyle='None')
+    plt.legend(loc='best')
     if len(compare):
         i = 0
-        resid_compare = []
+        resid_detuning_compare = []
         for _Yb,_calib,_compare,_means_calib in zip(Yb_array,freq_calib,compare,means_calib):
             if abs(_compare[int(len(_compare)/2)]) > 1000:
                 _compare_shift,_compare_means,_compare_err = shift3Gaussians_2Zero(_compare,_Yb)
-                _compare_resid = np.array([-954.328,0,1000.02]) - _compare_means
-                resid_compare.extend(_compare_resid)
-            if plpt:
+                _compare_176 = (_compare_means[0] - _compare_means[1]) - (-954.328)
+                _compare_172 = _compare_means[2] -_compare_means[1] - (1000.02)
+                resid_detuning_compare.append(np.array([_compare_176,_compare_172]))
+            if plot:
                 plt.figure()
                 plt.plot(_calib,_Yb, label='Calibrated')
                 plt.plot(_compare_shift,_Yb,label='Uncalibrated')
@@ -738,11 +746,10 @@ def calib556_array(Yb_array,method,compare=[],method=1,plot=False,verbose=False)
                 s172 = '172Yb\nActual = {} MHz, Wavemeter = {} MHz, Cal = {} MHz\n'.format(1000.02,_compare_means[2],_means_calib[2])
                 print(title,s176,s174,s172)
             i+=1
-        resid_compare_flat = np.array(resid_compare).flatten()
+        resid_compare_flat = np.array(resid_detuning_compare).flatten()
         plt.figure(10)
         plt.plot(xticks_flat,resid_compare_flat,marker='o',label='Wavemeter',linestyle='None')
-        plt.legend(loc='best')
-    return [np.array(freq_calib),np.array(resid_calib)]
+    return [np.array(freq_calib),np.array(resid_detuning_calib),[xticks_flat,resid_calib_flat]]
 
 def shift3Gaussians_2Zero(xscale,data):
     mean_guess,stdev_guess,norm_guess = genGuess3Gaussians(xscale,data)
@@ -801,7 +808,7 @@ def fitFunction(xscale,data,function,guess,sigma,plot):
     try:
         popt,pcov = curve_fit(function,xscale,data,p0=guess,sigma=sigma)
         perr = np.round(np.sqrt((np.diag(pcov))),decimals=6)
-        popt = np.round(popt,decimals=6)
+        params = np.round(popt,decimals=6)
         fit = function(xscale,*popt)
         residuals = data - fit
         if plot:
@@ -809,10 +816,10 @@ def fitFunction(xscale,data,function,guess,sigma,plot):
             plotFitResiduals(xscale,residuals,sigma)
     except RuntimeError:
         print("Error - curve_fit failed")
-        popt = []
+        params = []
         perr = []
         residuals = []
-    return [popt,perr,residuals]
+    return [params,perr,residuals]
 
 def plotFitComparison(xscale,data,function,params,sigma,xlabel=None,ylabel=None):
     plt.figure()
@@ -820,7 +827,7 @@ def plotFitComparison(xscale,data,function,params,sigma,xlabel=None,ylabel=None)
     if sigma:
         plt.errorbar(xscale,data,yerr=sigma,label='Data',marker='o',linestyle='None')
     else:
-        plt.plot(xscale,data,label='Data')
+        plt.plot(xscale,data,label='Data',marker='o')
     plt.plot(xscale,function(xscale,*params),label='Fit')
     return
 
@@ -851,7 +858,7 @@ def fitInvertedLine(x,y,guess,xsigma,plot,verbose):
     intercept_err = intercept * np.sqrt((errors_inv[1]/params_inv[1])**2 + (errors_inv[0]/params_inv[0])**2)
     params = [slope,intercept]
     error = [slope_err,intercept_err]
-    fit = line(x,*params_l)
+    fit = line(x,*params)
     residuals = y - fit
     if plot:
         plotFitComparison(x,y,line,params,None)
@@ -904,9 +911,9 @@ def fitGaussian(xscale, data,guess=[100,0,0.16,0],sigma=None,plot=True,verbose=F
     function = gaussian
     params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot)
     if verbose:
+        print('\n')
         print('Fit error = ',error)
         print('FIT PARAMS = ',params)
-        print('\n')
         print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
     return [params,error,residuals]
 
@@ -918,9 +925,9 @@ def fit3Gaussians(xscale, data,mean_guess,stdev_guess,norm_guess,offset_guess=[0
     function = threeGaussians
     params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot)
     if verbose:
+        print('\n')
         print('Fit error = ',error)
         print('FIT PARAMS = ',params)
-        print('\n')
         for i in range(3):
             peaknum = i+1
             mean = params[3+i]
@@ -937,9 +944,9 @@ def fit2Gaussians(xscale, data,mean_guess,stdev_guess,norm_guess,offset_guess=[0
     function = twoGaussians
     params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot)
     if verbose:
+        print('\n')
         print('Fit error = ',error)
         print('FIT PARAMS = ',params)
-        print('\n')
         for i in range(2):
             peaknum = i+1
             mean = params[2+i]
