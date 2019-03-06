@@ -780,6 +780,9 @@ def averageSpectra(freq_array,spectra_array,bin_size=10):
     avg_spectra = _sum/num_avg
     return [bins,avg_spectra]
 
+
+################################################################################
+
 '''Fitting Functions'''
 
 def gaussian(x,a,b,n,c):
