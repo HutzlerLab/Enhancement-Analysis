@@ -698,14 +698,14 @@ def calib556_3peaks(Yb_spectra,method,plot=False,verbose=False):
     resid_detuning = [detuning_176-Yb_176,detuning_172-Yb_172]
     return [freq_calib,means_calib,resid_detuning]
 
-def calib556_array(Yb_array,method,compare=[],plot=False,verbose=False):
+def calib556_array(Yb_array,method,compare=[],plot=False,verbose=False,fig=1000):
     freq_calib = []
     means_calib = []
     resid_detuning_calib = []
     xresid_flat = []
 
-    plt.figure(10)
-    plt.title('Fit Residuals')
+    plt.figure(fig)
+    plt.title('Fit Detuning Residuals')
     xticks = [0,1]
     plt.plot(xticks,np.zeros(len(xticks)),linestyle='--',color='black')
     xlabel = ['176Yb','172Yb']
@@ -722,7 +722,7 @@ def calib556_array(Yb_array,method,compare=[],plot=False,verbose=False):
     resid_calib_flat = np.array(resid_detuning_calib).flatten()
     xticks_flat = np.array(xresid_flat)
 
-    plt.figure(10)
+    plt.figure(fig)
     plt.plot(xticks_flat,resid_calib_flat,marker='o',label='Calibrated Method {}'.format(method),linestyle='None')
     plt.legend(loc='best')
     if len(compare):
@@ -747,8 +747,9 @@ def calib556_array(Yb_array,method,compare=[],plot=False,verbose=False):
                 print(title,s176,s174,s172)
             i+=1
         resid_compare_flat = np.array(resid_detuning_compare).flatten()
-        plt.figure(10)
+        plt.figure(fig)
         plt.plot(xticks_flat,resid_compare_flat,marker='o',label='Wavemeter',linestyle='None')
+        plt.legend(loc='best')
     return [np.array(freq_calib),np.array(resid_detuning_calib),[xticks_flat,resid_calib_flat]]
 
 def shift3Gaussians_2Zero(xscale,data):
@@ -808,6 +809,8 @@ def line0(x,m):
     return value
 
 def fitFunction(xscale,data,function,guess,sigma,plot):
+    xscale = np.array(xscale)
+    data = np.array(data)
     try:
         popt,pcov = curve_fit(function,xscale,data,p0=guess,sigma=sigma)
         perr = np.round(np.sqrt((np.diag(pcov))),decimals=6)
