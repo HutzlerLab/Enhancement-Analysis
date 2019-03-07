@@ -43,10 +43,14 @@ def readCSVrows(filepath):
 '''Import raw traces from data columns in single cleverscope text file'''
 def importRawData(filepath,usecols=(1,2)):
     #generate array from text file
-    arr = np.genfromtxt(filepath,delimiter='', skip_header = 15, usecols=usecols)
-    ch1_raw = arr.T[0] #Channel A
-    ch2_raw = arr.T[1] #Channel B
-    raw_data = [ch1_raw,ch2_raw]
+    try:
+        arr = np.genfromtxt(filepath,delimiter='', skip_header = 15, usecols=usecols)
+        ch1_raw = arr.T[0] #Channel A
+        ch2_raw = arr.T[1] #Channel B
+        raw_data = [ch1_raw,ch2_raw]
+    except ValueError:
+        print('Issues with file located at: ',filepath)
+        raw_data = [np.zeros(10000),np.zerps(10000)]
     return raw_data
 
 '''Grab trace parameters from single cleverscope text file'''
