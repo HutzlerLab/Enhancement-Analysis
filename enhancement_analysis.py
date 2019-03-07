@@ -670,6 +670,9 @@ def getODsfromBUB(folder_path,start_num,stop_num,skips=[],initial_blocked=False,
 
 '''Analayis Functions'''
 
+def backAndForth(Yb_spectra,YbOH_spectra):
+    
+
 def calib556_3peaks(Yb_spectra,method,plot=False,verbose=False):
     #Assuming data was taken at even intervals. Assuming data starts at low freq and ends at high, and contains 3 peaks corresponding to 176Yb, 174Yb, and 172Yb.
     #First, generate a scale in number of samples
