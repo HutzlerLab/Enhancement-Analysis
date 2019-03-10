@@ -25,11 +25,16 @@ def timeArray(parameters):
 
 '''Calculate the optical depth (OD) signal from a single text file.
     Returns a dataset, which consists of the optical dpeth and acquisition parameters'''
-def calculateSingleOD(root_folder,num):
+def calculateSingleOD(root_folder,num,ch=3):
     raw_traces,params = file2dataset(root_folder,num)
-    OD_ch1 = raw2OD(np.array(raw_traces[0]),timeArray(params))
-    OD_ch2 = raw2OD(np.array(raw_traces[1]),timeArray(params))
-    return [OD_ch1,OD_ch2,params]
+    if ch == 3: #Get both channels
+        ch1 = raw2OD(np.array(raw_traces[0]),timeArray(params))
+        ch2 = raw2OD(np.array(raw_traces[1]),timeArray(params))
+        ODs = [ch1,ch2]
+    else:
+        single_ch = raw2OD(np.array(raw_traces[ch-1]),timeArray(params))
+        ODs = [single_ch]
+    return [ODs,params]
 
 
 
@@ -129,3 +134,34 @@ def smooth(data,window=5,poly_order=3):
         window+=1
     smoothed_data = savgol_filter(data, window, poly_order)
     return smoothed_data
+
+'''Integrate time slice of the OD from start to stop.
+    start_stop = [start,stop] in ms'''
+def sliceIntegrate(OD,time_ms,start_stop,fig_num=1):
+    start_i = np.searchsorted(time_ms,start_stop[0])
+    stop_i = np.searchsorted(time_ms,start_stop[1])
+    t = slice(start_i,stop_i)
+    dt = np.round(time_ms[1]-time_ms[0],decimals=6)
+    integrated = np.round(OD[t].sum()*dt,decimals=6)
+    plt.figure(fig_num)
+    plt.plot(time_ms[t],OD[t])
+    return integrated
+
+    
+#Not used anymore. Only useful if there is linear drift
+# def subtractBackground(raw,time):
+#     end = len(cell_abs)
+#     start = 5000
+#     t = slice(start,end)
+#     offset = -1.8486
+#     num_avg = 900
+#     time_ms = np.round(np.linspace(offset,dt*(end-1)+offset,end),decimals = 6)
+#     b_guess = cell_abs[:num_avg].sum()/num_avg
+#     m_guess = 0
+#     abs_slice = cell_abs[t]
+#     time_slice = time_ms[t]
+#     params = fitLine(time_slice,abs_slice,guess=[m_guess,b_guess])
+#     background = line(time_ms,*params)
+#     cell_OD = np.log(background/cell_abs)
+#     #cell_OD[cell_OD<0]=0
+#     return cell_OD

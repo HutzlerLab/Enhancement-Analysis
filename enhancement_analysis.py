@@ -12,6 +12,7 @@ from scipy.signal import savgol_filter,find_peaks,peak_widths
 import csv
 from math import ceil,floor
 from fit_functions import *
+from low_level import timeArray,calculateSingleOD
 
 '''Global variables record indexing of parameter array for each trace'''
 dt_INDEX = 0
@@ -22,79 +23,10 @@ blocked_INDEX = 4
 param_LENGTH = 5
 
 
-############################################# Raw Data Functions #############################################
 
-'''Read/write rows from/to CSV'''
-def writeCSVrows(array_of_arrays,filepath):
-    with open(filepath,'w+',newline='') as f:
-        w = csv.writer(f)
-        for array in array_of_arrays:
-            w.writerow(array)
-    print('Done! Array written to', filepath)
-    return
 
-def readCSVrows(filepath):
-    with open(filepath,'r') as f:
-        r = csv.reader(f)
-        rows = np.array([np.array([float(value) for value in row]) for row in r])
-    print('Done! Array read from', filepath)
-    return rows
-
-'''Import raw traces from data columns in single cleverscope text file'''
-def importRawData(filepath,usecols=(1,2)):
-    #generate array from text file
-    try:
-        arr = np.genfromtxt(filepath,delimiter='', skip_header = 15, usecols=usecols)
-        ch1_raw = arr.T[0] #Channel A
-        ch2_raw = arr.T[1] #Channel B
-        raw_data = [ch1_raw,ch2_raw]
-    except ValueError:
-        print('Issues with file located at: ',filepath)
-        raw_data = [np.zeros(10000),np.zerps(10000)]
-    return raw_data
-
-'''Grab trace parameters from single cleverscope text file'''
-def importCleverParams(filepath):
-    with open(filepath, 'r') as f:
-        lines=[]
-        for i in range(15):
-            lines.append(f.readline())
-    params=np.zeros(param_LENGTH)
-    for text in lines:
-        if 'delta' in text:
-            dt_ms = np.round(float(text.split('\t')[1].strip())*10**3,decimals=6)
-            params[dt_INDEX]=dt_ms
-        elif 'start' in text:
-            start_ms = np.round(float(text.split('\t')[1].strip())*10**3,decimals = 6)
-            params[start_INDEX]=start_ms
-        elif 'nsample' in text:
-            nsample = int(float(text.split('\t')[1].strip()))
-            params[nsample_INDEX]=nsample
-        elif 'TriggerTime' in text:
-            time_sec = float(text.split('\t')[1].strip())*24*3600 #convert days to seconds
-            params[trigtime_INDEX]=time_sec
-    return params
-
-'''Generate filepath for single text file named "spectra_num.txt"'''
-def genPath(root_folder,num):
-    num_str = str(num)
-    name = 'spectra_'
-    file =  name + num_str + '.txt'
-    #path is given from current working directory
-    filepath = pathlib.Path.cwd() / root_folder / file
-    return filepath
-
-'''From a single file location, obtain dataset with raw data and associated parameters'''
-def file2dataset(root_folder,num,print_bool=False):
-    filepath = genPath(root_folder,num)
-    if print_bool:
-        print(filepath)
-    data = importRawData(filepath)
-    parameters = importCleverParams(filepath)
-    dataset = [data,parameters]
-    return dataset
-
-'''Convert many raw text files to data arrays.
+'''Depreciated
+    Convert many raw text files to data arrays.
     This code is written to handle data that alternates between blocked/unblocked.
     Initial = True/False refers to the first file being Blocked/Unblocked
     Alternate = True/False refers to if the order goes B Ub Ub B (True) or B Ub B Ub (False)
@@ -157,30 +89,6 @@ def getRawDataset_BUB(folder_path,start_num,stop_num,print_bool,skips=[],initial
 ############################################# Data Processing Functions #############################################
 
 
-'''Convert raw absorption data into optical depth'''
-def raw2OD(raw_data,time_ms):
-    trigger_index = np.searchsorted(time_ms,0)
-    beforeYAG_index = np.searchsorted(time_ms,-0.1)
-    #Calculate DC offset, convert signal to OD
-    offset = raw_data[:beforeYAG_index].mean()
-    #Smooth the data
-    smoothed_data = smooth(raw_data,window=60)
-    smoothed_data[smoothed_data<0] = 0.00001
-    #Calculate OD, fix floating point errors
-    OD = np.log(offset/smoothed_data)
-    if OD[trigger_index]<0:
-        offset = smoothed_data[trigger_index]
-        OD = np.log(offset/smoothed_data)
-    return OD
-
-'''Function for smoothing data. Currently uses Savitzky-Golay filter, which fits a window
-    onto a polynomial of some order, and then uses the polynomial to estimate the value'''
-def smooth(data,window=5,poly_order=3):
-    #window value must be odd
-    if window % 2 == 0:
-        window+=1
-    smoothed_data = savgol_filter(data, window, poly_order)
-    return smoothed_data
 
 #Not used anymore. Only useful if there is linear drift
 # def subtractBackground(raw,time):
@@ -200,26 +108,10 @@ def smooth(data,window=5,poly_order=3):
 #     #cell_OD[cell_OD<0]=0
 #     return cell_OD
 
-'''Generate time array with time series information'''
-def timeArray(parameters):
-    dt = parameters[dt_INDEX]
-    t0 = parameters[start_INDEX]
-    npnts = parameters[nsample_INDEX]
-    time_ms = np.round(np.linspace(t0,dt*(npnts-1)+t0,npnts),decimals = 6)
-    return time_ms
-
-'''Calculate the optical depth (OD) signal from a single text file.
-    Returns a dataset, which consists of the optical dpeth and acquisition parameters'''
-def calculateSingleOD(root_folder,num):
-    raw_traces,params = file2dataset(root_folder,num)
-    OD_ch1 = raw2OD(np.array(raw_traces[0]),timeArray(params))
-    OD_ch2 = raw2OD(np.array(raw_traces[1]),timeArray(params))
-    return [OD_ch1,OD_ch2,params]
-
 
 '''Iterate through a series of files and calculate ODs and parameters from both
     channels. Returns an array of ODs and parameters.'''
-def calculateSeriesODFromRaw(folder,start_num,stop_num,skips=[],skip_every_other=False):
+def calculateSeriesODFromRaw(folder,start_num,stop_num,skips=[], ch=3, ABAB = False, ABBA = False, BAAB=False):
     stop_num+=1
     Ch1_ODs = []
     Ch2_ODs = []
@@ -227,24 +119,51 @@ def calculateSeriesODFromRaw(folder,start_num,stop_num,skips=[],skip_every_other
     progress = widgets.FloatProgress(value=0.0, min=0.0, max=1.0)
     display(progress)
     delta = 1
-    if skip_every_other:
+    index = -1
+    if ABAB:
     	delta = 2
+    elif ABBA or BAAB:
+        delta = 1
+        index = 1
     for i in range(start_num,stop_num,delta):
+        if index == 1: # (A)BBA
+            index+=1
+            if BAAB:
+                continue
+        elif index == 2 or 3: # A(B)BA or AB(B)A
+            index+=1
+            if ABBA:
+                continue
+        elif index == 4: # ABB(A)
+            index = 1
+            if BAAB:
+                continue
         if i in skips:
-            pass
-        else:
-            dataset = calculateSingleOD(folder,i)
-            Ch1_ODs.append(dataset[0])
-            Ch2_ODs.append(dataset[1])
-            params.append(dataset[-1])
+            continue
+        dataset = calculateSingleOD(folder,i,ch)
+        _ODs = dataset[0]
+        _params = dataset[-1]
+        if len(_ODs)>1: #Both channels
+            Ch1_ODs.append(_ODs[0])
+            Ch2_ODs.append(_ODs[1])
+        elif ch==1:
+            Ch1_ODs.append(_ODs[0])
+        elif ch==2:
+            Ch2_ODs.append(_ODs[0])
+        params.append(_params)
         progress.value = float(i-start_num+1)/(stop_num-start_num)
-    dataset = [np.array(Ch1_ODs), np.array(Ch2_ODs),np.array(params)]
+    if ch==1:
+        dataset = [np.array(Ch1_ODs),np.array(params)]
+    if ch==2:
+        dataset = [np.array(Ch2_ODs),np.array(params)]
+    else:
+        dataset = [np.array(Ch1_ODs), np.array(Ch2_ODs),np.array(params)]
     return dataset
 
 '''Iterate through a series of files and compiles ODs and parameters.
     Labels the whole series as blocked (True) or unblocked (False).
     Returns an array of ODs and parameters'''
-def label_BUB(param_array,blocked_bool):
+def labelBUB(param_array,blocked_bool):
     for single_param in param_array:
         single_param[blocked_INDEX] = blocked_bool
     return [ODs,params]
@@ -341,7 +260,7 @@ def extractTimestamps(params):
 
 
 '''Extracts trigger timestamps from blocked/unblocked parameter arrays, and averages the two times together'''
-def extractTimestamps_BUB(blocked_params,unblocked_params):
+def extractTimestampsBUB(blocked_params,unblocked_params):
     blocked_timestamps = []
     unblocked_timestamps = []
     if blocked_params[0][trigtime_INDEX] < unblocked_params[0][trigtime_INDEX]:
@@ -401,7 +320,7 @@ def integrateODSeries(ODs,parameters,start_stop=[0,3],fignum=1):
 
 
 ''''''
-def processChirp(dataset, start_stop=[0,3]):
+def processChirp(dataset, start_stop=[0,6]):
     YbOH_fig = 1
     plt.figure(YbOH_fig)
     plt.title('YbOH OD')
@@ -414,21 +333,32 @@ def processChirp(dataset, start_stop=[0,3]):
     plt.xlabel('Time (ms)')
     plt.ylabel('OD')
 
-    YbOH_ODs = dataset[0]
-    Yb_ODs = dataset[1]
     params = dataset[-1]
+    if len(dataset) == 3
+        YbOH_ODs = dataset[0]
+        Yb_ODs = dataset[1]
+    else:
+        YbOH_ODs = dataset[0]
+        Skip_Yb = True
 
     YbOH_int_ODs = integrateODSeries(YbOH_ODs,params,start_stop,fignum=YbOH_fig)
-    Yb_int_ODs = integrateODSeries(Yb_ODs,params,start_stop,fignum=Yb_fig)
     times = extractTimestamps(params)
     sorted_YbOH_int = sortData(times,YbOH_int_ODs)
-    sorted_Yb_int = sortData(times,Yb_int_ODs)
-    #sorted_ODs = sortData(times,ODs)
     sorted_times = sorted(times)
-    return [np.array(sorted_YbOH_int), np.array(sorted_Yb_int), np.array(sorted_times)]
+    if Skip_Yb:
+        results = [np.array(sorted_YbOH_int), np.array(sorted_times)]
+    else:
+        Yb_int_ODs = integrateODSeries(Yb_ODs,params,start_stop,fignum=Yb_fig)
+        sorted_Yb_int = sortData(times,Yb_int_ODs)
+        results = [np.array(sorted_YbOH_int), np.array(sorted_Yb_int), np.array(sorted_times)]
+    return results
 
 def processChirpWithBounds(dataset,freq_start,freq_stop, start_stop=[0,6]):
-    YbOH, Yb, time = processScan(dataset,start_stop)
+    if len(dataset)==3:
+        YbOH, Yb, time = processScan(dataset,start_stop)
+    else:
+        YbOH, time = processScan(dataset,start_stop)
+        Yb = np.zeros(len(time))
     deltat = time[-1]
     print('Chirp took {} seconds'.format(deltat))
     lightspeed = 29979.2458 #cm/us
