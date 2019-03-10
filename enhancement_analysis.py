@@ -219,14 +219,17 @@ def calculateSingleOD(root_folder,num):
 
 '''Iterate through a series of files and calculate ODs and parameters from both
     channels. Returns an array of ODs and parameters.'''
-def calculateSeriesODFromRaw(folder,start_num,stop_num,skips=[]):
+def calculateSeriesODFromRaw(folder,start_num,stop_num,skips=[],skip_every_other=False):
     stop_num+=1
     Ch1_ODs = []
     Ch2_ODs = []
     params = []
     progress = widgets.FloatProgress(value=0.0, min=0.0, max=1.0)
     display(progress)
-    for i in range(start_num,stop_num):
+    delta = 1
+    if skip_every_other:
+    	delta = 2
+    for i in range(start_num,stop_num,delta):
         if i in skips:
             pass
         else:
@@ -398,7 +401,7 @@ def integrateODSeries(ODs,parameters,start_stop=[0,3],fignum=1):
 
 
 ''''''
-def processScan(dataset, start_stop=[0,3]):
+def processChirp(dataset, start_stop=[0,3]):
     YbOH_fig = 1
     plt.figure(YbOH_fig)
     plt.title('YbOH OD')
@@ -422,9 +425,9 @@ def processScan(dataset, start_stop=[0,3]):
     sorted_Yb_int = sortData(times,Yb_int_ODs)
     #sorted_ODs = sortData(times,ODs)
     sorted_times = sorted(times)
-    return [sorted_YbOH_int, sorted_Yb_int, sorted_times]
+    return [np.array(sorted_YbOH_int), np.array(sorted_Yb_int), np.array(sorted_times)]
 
-def processChirp(dataset,freq_start,freq_stop, start_stop=[0,6]):
+def processChirpWithBounds(dataset,freq_start,freq_stop, start_stop=[0,6]):
     YbOH, Yb, time = processScan(dataset,start_stop)
     deltat = time[-1]
     print('Chirp took {} seconds'.format(deltat))
@@ -668,10 +671,16 @@ def getODsfromBUB(folder_path,start_num,stop_num,skips=[],initial_blocked=False,
 
 #########################################################################################################################################################
 
+
 '''Analayis Functions'''
 
-def backAndForth(Yb_spectra,YbOH_spectra):
-    
+#def processBackAndForth(Yb_spectra,YbOH_spectra,times,range):
+    #Divide files into individual scans
+        #Detect Yb peaks
+        #Divide spectra along half-way line
+        #Map time array onto frequency range
+    #Recenter scans on Yb peak
+    #
 
 def calib556_3peaks(Yb_spectra,method,plot=False,verbose=False):
     #Assuming data was taken at even intervals. Assuming data starts at low freq and ends at high, and contains 3 peaks corresponding to 176Yb, 174Yb, and 172Yb.

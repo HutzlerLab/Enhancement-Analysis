@@ -4,9 +4,25 @@ import numpy as np
 from scipy.signal import savgol_filter,find_peaks,peak_widths
 from math import ceil,floor
 
-def gaussian(x,a,b,n,c):
+def gaussian(x,a,b,n,c): # n exp(-(x-b)^2/(2a^2)) + c
     value= n*np.exp(-(x-b)**2/(2*a**2))+c
     return value
+
+def flatTopGaussian(x,a,b,n,c,p): # n exp(-{(x-b)/(sqrt(2)a)}^p) + c
+    value = n*np.exp(-((x-b)/(np.sqrt(2)*a))**p) + c
+    return value
+
+def fitFlatTopGaussian(xscale,data,plot=True,verobse=False):
+    loc,width,height = genGuessGaussian(xscale,data)
+    guess = [width,loc,height,0,4]
+    bounds = ([0,-np.inf,-np.inf,-np.inf,4],[np.inf,np.inf,np.inf,np.inf,10])
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
+    if verbose:
+        print('\n')
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+        print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
+    return [params,error,residuals]
 
 def genGuessGaussian(xscale,data):
     peak_indices,properties = find_peaks(data, height =np.amax(data))
@@ -26,11 +42,13 @@ def line0(x,m):
     value = line(x,m,0)
     return value
 
-def fitFunction(xscale,data,function,guess,sigma,plot):
+def fitFunction(xscale,data,function,guess,sigma,plot,bounds=None):
     xscale = np.array(xscale)
     data = np.array(data)
+    if bounds==None:
+        bounds = (-np.inf,np.inf)
     try:
-        popt,pcov = curve_fit(function,xscale,data,p0=guess,sigma=sigma)
+        popt,pcov = curve_fit(function,xscale,data,p0=guess,sigma=sigma,bounds=bounds)
         perr = np.round(np.sqrt((np.diag(pcov))),decimals=6)
         params = np.round(popt,decimals=6)
         fit = function(xscale,*popt)
