@@ -409,5 +409,39 @@ def splitData(YbOH,Yb,times,num_peaks,initial_up):
     print(_sum)
     return [YbOH_split,Yb_split,times_split]
 
+def identifyBUB(a1,a2,equal=False):
+    _a1 = a1
+    _a2 = a2
+    if equal:
+        delta = len(a1[0]) - len(a2[0])
+        if delta > 0:
+            _a1 = [a1[i][:-delta] for i in range(len(a1))]
+        elif delta < 0:
+            _a2 = [a2[i][:-delta] for i in range(len(a2))]
+    if _a1[0].mean() > _a2[0].mean():
+        unblocked = _a1
+        blocked = _a2
+    else:
+        unblocked = _a2
+        blocked = _a1
+    return [blocked,unblocked]
+
+def matchBUB(blocked,unblocked):
+    b_match = []
+    ub_match = []
+    for _barray,_ubarray in zip(blocked,unblocked):
+        _b_split = []
+        _ub_split = []
+        for _b,_ub in zip(_barray,_ubarray):
+            delta = len(_ub) - len(_b)
+            if delta>0:
+                _ub = _ub[:-delta]
+            elif delta<0:
+                _b = _b[:delta]
+            _b_split.append(_b)
+            _ub_split.append(_ub)
+        b_match.append(_b_split)
+        ub_match.append(_ub_split)
+    return [b_match,ub_match]
 
 #################################################################################################################################
