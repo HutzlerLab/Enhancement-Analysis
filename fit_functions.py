@@ -1,46 +1,61 @@
+'''
+Functions useful for curve fitting and related operations.
+By Arian Jadbabaie
+'''
+
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 import numpy as np
 from scipy.signal import savgol_filter,find_peaks,peak_widths
 from math import ceil,floor
+from scipy.special import wofz
 
-def gaussian(x,a,b,n,c): # n exp(-(x-b)^2/(2a^2)) + c
-    value= n*np.exp(-(x-b)**2/(2*a**2))+c
-    return value
 
-def flatTopGaussian(x,a,b,n,c,p): # n exp(-{(x-b)/(sqrt(2)a)}^p) + c
-    value = n*np.exp(-((x-b)/(np.sqrt(2)*a))**p) + c
-    return value
+###############################################################################
+'''Functions Involving Curve Fits'''
+###############################################################################
 
-def fitFlatTopGaussian(xscale,data,plot=True,verobse=False):
-    loc,width,height = genGuessGaussian(xscale,data)
-    guess = [width,loc,height,0,4]
-    bounds = ([0,-np.inf,-np.inf,-np.inf,4],[np.inf,np.inf,np.inf,np.inf,10])
-    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
-    if verbose:
-        print('\n')
-        print('Fit error = ',error)
-        print('FIT PARAMS = ',params)
-        print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
-    return [params,error,residuals]
+def shift3Gaussians(xscale,data):
+    mean_guess,stdev_guess,norm_guess = genGuess3Gaussians(xscale,data)
+    params_3g,err_3g,resid_3g = fit3Gaussians(xscale, data, mean_guess, stdev_guess, norm_guess,offset_guess=[data.min()],plot=False,verbose=False)
+    means = params_3g[3:6]
+    means_err = err_3g[3:6]
+    #Offset so that the middle peak is at 0
+    x_shift = xscale - means[1]
+    means_shifted = np.array(means)-means[1]
+    return [x_shift,means_shifted,means_err]
 
-def genGuessGaussian(xscale,data):
-    peak_indices,properties = find_peaks(data, height =np.amax(data))
-    peak_locs = xscale[peak_indices]
-    peak_heights = properties['peak_heights']
-    width_info = peak_widths(data,peak_indices)
-    width_indices = width_info[0]
-    deltax = abs(xscale[-1]-xscale[0])/len(xscale)
-    widths = width_indices*deltax
-    return [peak_locs,widths,peak_heights]
+def shiftFlatTop(xscale,data,method=1):
+    if method == 1:
+        loc,width,height = genGuessGaussian(xscale,data)
+        guess = [width,loc,height,0,height/1.1]
+        peak_idx,properties = find_peaks(data, height =np.amax(data))
+        width_info = peak_widths(data,peak_idx)
+        width_idx = width_info[0]
+        s = slice(int(peak_idx-2.5*width_idx),int(peak_idx+2.5*width_idx))
+        _x = xscale[s]
+        _data = data[s]
+        params,error,resid = fitFlatTopGaussian(_x,_data,guess,plot=True,verbose=False)
+        mean = params[1]
+        x_shift = xscale - mean
+    else:
+        loc,width,height = genGuessGaussian(xscale,data)
+        guess = [width/2,width/2,loc,height*width,0,height/1.1]
+        peak_idx,properties = find_peaks(data, height =np.amax(data))
+        width_info = peak_widths(data,peak_idx)
+        width_idx = width_info[0]
+        s = slice(int(peak_idx-3*width_idx),int(peak_idx+3*width_idx))
+        _x = xscale[s]
+        _data = data[s]
+        params,error,resid = fitFlatTopVoigt(_x,_data,guess,plot=True,verbose=False)
+        mean = params[2]
+        x_shift = xscale - mean
+    return x_shift
 
-def line(x,m,b):
-    value = m*x+b
-    return value
 
-def line0(x,m):
-    value = line(x,m,0)
-    return value
+###############################################################################
+'''Curve Fitting'''
+###############################################################################
 
 def fitFunction(xscale,data,function,guess,sigma,plot,bounds=None):
     xscale = np.array(xscale)
@@ -63,25 +78,27 @@ def fitFunction(xscale,data,function,guess,sigma,plot,bounds=None):
         residuals = []
     return [params,perr,residuals]
 
-def plotFitComparison(xscale,data,function,params,sigma,xlabel=None,ylabel=None):
-    plt.figure()
-    plt.title('Fit vs Data')
-    if sigma:
-        plt.errorbar(xscale,data,yerr=sigma,label='Data',marker='o',linestyle='None')
-    else:
-        plt.plot(xscale,data,label='Data',marker='o')
-    plt.plot(xscale,function(xscale,*params),label='Fit')
-    return
+def fitFlatTopGaussian(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=False):
+    bounds = ([0,-np.inf,-np.inf,-np.inf,data.max()/2],[abs(xscale[-1]-xscale[0]),np.inf,np.inf,np.inf,np.inf])
+    function = flatGaussian
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
+    if verbose:
+        print('\n')
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+        print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
+    return [params,error,residuals]
 
-def plotFitResiduals(xscale,residuals,sigma):
-    plt.figure()
-    plt.title('Fit Residuals')
-    if sigma:
-        plt.errorbar(xscale,residuals,yerr=sigma,marker='o',linestyle='None')
-    else:
-        plt.plot(xscale,residuals,'o',linestyle='None')
-    plt.plot(xscale,np.zeros(len(xscale)),linestyle='--')
-    return
+def fitFlatTopVoigt(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=False):
+    bounds = ([0,0,-np.inf,-np.inf,-np.inf,data.max()/2],[np.inf,np.inf,np.inf,np.inf,np.inf,np.inf])
+    function = flatVoigt
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
+    if verbose:
+        print('\n')
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+    return [params,error,residuals]
+
 
 def fitInvertedLine(x,y,guess,xsigma,plot,verbose):
     # NOTE: inputs are all NOT inverted, the inversion is done in this function
@@ -125,30 +142,6 @@ def fitLine(xscale, data,guess=[1,0],sigma=None,plot=True,verbose=False):
         print('Yintercept = {} +/- {}'.format(params[1],error[1]))
     return [params,error,residuals]
 
-def twoGaussians(x,a1,a2,b1,b2,n1,n2,c=0):
-    params1 = [a1,b1,n1,c]
-    params2 = [a2,b2,n2,c]
-    total = gaussian(x,*params1)+gaussian(x,*params2)
-    return total
-
-def threeGaussians(x,a1,a2,a3,b1,b2,b3,n1,n2,n3,c=0):
-    params1 = [a1,b1,n1,c]
-    params2 = [a2,b2,n2,c]
-    params3 = [a3,b3,n3,c]
-    total = gaussian(x,*params1)+gaussian(x,*params2)+gaussian(x,*params3)
-    return total
-
-def genGuess3Gaussians(xscale, data):
-    peak_indices,properties = find_peaks(data, height =np.amax(data)/5,distance=len(data)/6)
-    peak_locs = xscale[peak_indices]
-    peak_heights = properties['peak_heights']
-    width_info = peak_widths(data,peak_indices)
-    width_indices = width_info[0]
-    deltax = abs(xscale[-1]-xscale[0])/len(xscale)
-    widths = width_indices*deltax
-    return [peak_locs,widths,peak_heights]
-
-
 def fitGaussian(xscale, data,guess=[100,0,0.16,0],sigma=None,plot=True,verbose=False):
     function = gaussian
     params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot)
@@ -158,7 +151,6 @@ def fitGaussian(xscale, data,guess=[100,0,0.16,0],sigma=None,plot=True,verbose=F
         print('FIT PARAMS = ',params)
         print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
     return [params,error,residuals]
-
 
 def fit3Gaussians(xscale, data,mean_guess,stdev_guess,norm_guess,offset_guess=[0],sigma=None,plot=True,verbose=False):
     guess = list(stdev_guess) + list(mean_guess) + list(norm_guess)+list(offset_guess)
@@ -197,3 +189,104 @@ def fit2Gaussians(xscale, data,mean_guess,stdev_guess,norm_guess,offset_guess=[0
             stdev_err = error[i]
             print('Mean {} = {} +/- {} MHz, StDev {} = {} +/- {} MHz'.format(peaknum,mean,mean_err,peaknum,stdev,stdev_err))
     return [params,error,residuals]
+
+
+###############################################################################
+'''Generating Guesses for Fits'''
+###############################################################################
+
+def genGuessGaussian(xscale,data):
+    peak_indices,properties = find_peaks(data, height =np.amax(data))
+    peak_locs = xscale[peak_indices]
+    peak_heights = properties['peak_heights']
+    width_info = peak_widths(data,peak_indices)
+    width_indices = width_info[0]
+    deltax = abs(xscale[-1]-xscale[0])/len(xscale)
+    widths = width_indices*deltax
+    return [peak_locs,widths,peak_heights]
+
+def genGuess3Gaussians(xscale, data):
+    peak_indices,properties = find_peaks(data, height =np.amax(data)/5,distance=len(data)/6)
+    peak_locs = xscale[peak_indices]
+    peak_heights = properties['peak_heights']
+    width_info = peak_widths(data,peak_indices)
+    width_indices = width_info[0]
+    deltax = abs(xscale[-1]-xscale[0])/len(xscale)
+    widths = width_indices*deltax
+    return [peak_locs,widths,peak_heights]
+
+
+###############################################################################
+'''Plotting'''
+###############################################################################
+
+def plotFitComparison(xscale,data,function,params,sigma,xlabel=None,ylabel=None):
+    plt.figure()
+    plt.title('Fit vs Data')
+    if sigma:
+        plt.errorbar(xscale,data,yerr=sigma,label='Data',marker='o',linestyle='None')
+    else:
+        plt.plot(xscale,data,label='Data',marker='o')
+    plt.plot(xscale,function(xscale,*params),label='Fit')
+    return
+
+def plotFitResiduals(xscale,residuals,sigma):
+    plt.figure()
+    plt.title('Fit Residuals')
+    if sigma:
+        plt.errorbar(xscale,residuals,yerr=sigma,marker='o',linestyle='None')
+    else:
+        plt.plot(xscale,residuals,'o',linestyle='None')
+    plt.plot(xscale,np.zeros(len(xscale)),linestyle='--')
+    return
+
+
+###############################################################################
+'''f(x) = x Functions'''
+###############################################################################
+# Note these only work with numpy array inputs for x
+
+def line(x,m,b):
+    value = m*x+b
+    return value
+
+def line0(x,m):
+    value = line(x,m,0)
+    return value
+
+def gaussian(x,a,b,n,c): # n exp(-(x-b)^2/(2a^2)) + c
+    value= n*np.exp(-(x-b)**2/(2*a**2))+c
+    return value
+
+def flatTopFunction(x,function,func_params,threshold): # piece wise function. f(x)=f(x) when f(x)<s, otherwise f(x)=s
+    value = function(x,*func_params)
+    value[value>threshold]=threshold
+    return value
+
+def flatGaussian(x,a,b,n,c,threshold):
+    params = [a,b,n,c]
+    return flatTopFunction(x,gaussian,params,threshold)
+
+def flatVoigt(x,lor,sig,mean,n,c,threshold):
+    params = [lor,sig,mean,n,c]
+    return flatTopFunction(x,voigt,params,threshold)
+
+def voigt(x,lor,sig,mean,n,c):
+    value = n*np.real(wofz(((x-mean)+1j*lor)/(sig*np.sqrt(2))))/(sig*np.sqrt(2*np.pi))
+    return value
+
+def lorentzian(x, gamma):
+    return gamma / np.pi / (x**2 + gamma**2)
+
+def twoGaussians(x,a1,a2,b1,b2,n1,n2,c=0):
+    params1 = [a1,b1,n1,c]
+    params2 = [a2,b2,n2,c]
+    total = gaussian(x,*params1)+gaussian(x,*params2)
+    return total
+
+def threeGaussians(x,a1,a2,a3,b1,b2,b3,n1,n2,n3,c=0):
+    params1 = [a1,b1,n1,c]
+    params2 = [a2,b2,n2,c]
+    params3 = [a3,b3,n3,c]
+    total = gaussian(x,*params1)+gaussian(x,*params2)+gaussian(x,*params3)
+    return total

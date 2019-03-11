@@ -1,6 +1,7 @@
 import pathlib
 import numpy as np
 import csv
+import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 
 dt_INDEX = 0
@@ -135,6 +136,62 @@ def smooth(data,window=5,poly_order=3):
     smoothed_data = savgol_filter(data, window, poly_order)
     return smoothed_data
 
+'''Iterate through a series of files and compiles ODs and parameters.
+    Labels the whole series as blocked (True) or unblocked (False).
+    Returns an array of ODs and parameters'''
+def labelBUB(param_array,blocked_bool):
+    for single_param in param_array:
+        single_param[blocked_INDEX] = blocked_bool
+    return [ODs,params]
+
+'''Extracts trigger timestamps from parameter arrays. Times are in seconds relative to the initial file timestamp'''
+def extractTimestamps(params):
+    timestamps = []
+    for single_params in params:
+        if len(timestamps)==0:
+            initial = single_params[trigtime_INDEX]
+            timestamps.append(0)
+        else:
+            elapsed = single_params[trigtime_INDEX] - initial
+            timestamps.append(elapsed)
+    return np.array(timestamps)
+
+
+'''Extracts trigger timestamps from 2 (blocked/unblocked) parameter arrays,
+    relative to whichever was first'''
+def extractTimestampsBUB(blocked_params,unblocked_params):
+    blocked_timestamps = []
+    unblocked_timestamps = []
+    if blocked_params[0][trigtime_INDEX] < unblocked_params[0][trigtime_INDEX]:
+        blocked_first = True
+    else:
+        blocked_first = False
+    for i in range(len(blocked_params)):
+        if blocked_first:
+            if len(blocked_timestamps)==0:
+                initial = blocked_params[i][trigtime_INDEX]
+                blocked_timestamps.append(0)
+                elapsed_unblocked = unblocked_params[i][trigtime_INDEX] - initial
+                unblocked_timestamps.append(elapsed_unblocked)
+            else:
+                elapsed_blocked = blocked_params[i][trigtime_INDEX] - initial
+                elapsed_unblocked = unblocked_params[i][trigtime_INDEX] - initial
+                blocked_timestamps.append(elapsed_blocked)
+                unblocked_timestamps.append(elapsed_unblocked)
+        else:
+            if len(unblocked_timestamps)==0:
+                initial = unblocked_params[i][trigtime_INDEX]
+                unblocked_timestamps.append(0)
+                elapsed_blocked = blocked_params[i][trigtime_INDEX] - initial
+                blocked_timestamps.append(elapsed_blocked)
+            else:
+                elapsed_blocked = blocked_params[i][trigtime_INDEX] - initial
+                elapsed_unblocked = unblocked_params[i][trigtime_INDEX] - initial
+                blocked_timestamps.append(elapsed_blocked)
+                unblocked_timestamps.append(elapsed_unblocked)
+    return [blocked_timestamps,unblocked_timestamps]
+
+
 '''Integrate time slice of the OD from start to stop.
     start_stop = [start,stop] in ms'''
 def sliceIntegrate(OD,time_ms,start_stop,fig_num=1):
@@ -147,7 +204,28 @@ def sliceIntegrate(OD,time_ms,start_stop,fig_num=1):
     plt.plot(time_ms[t],OD[t])
     return integrated
 
-    
+def sortData(indep_var,depend_var):
+    #print(len(indep_var))
+    #print(len(depend_var))
+    if len(indep_var) != len(depend_var):
+        print('Number of independent and dependent variables do not match')
+    else:
+        if not isinstance(indep_var,list):
+            indep_var = list(indep_var)
+        sorted_DV = [DV for IV,DV in sorted(zip(indep_var,depend_var))]
+    return sorted_DV
+
+def calcEnhancement(blocked_int,unblocked_int):
+    num_traces = len(blocked_int)
+    enhancement = np.zeros(num_traces)
+    for i in range(num_traces):
+        if blocked_int[i]<0.0001:
+            enhancement[i]=0
+        else:
+            enhancement[i] = unblocked_int[i]/blocked_int[i]
+    return enhancement
+
+
 #Not used anymore. Only useful if there is linear drift
 # def subtractBackground(raw,time):
 #     end = len(cell_abs)
