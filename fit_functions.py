@@ -32,7 +32,7 @@ def shiftFlatTop(xscale,data,method=1):
         peak_idx,properties = find_peaks(data, height =np.amax(data))
         width_info = peak_widths(data,peak_idx)
         width_idx = width_info[0]
-        s = slice(int(peak_idx-2.5*width_idx),int(peak_idx+2.5*width_idx))
+        s = slice(int(peak_idx-3*width_idx),int(peak_idx+3*width_idx))
         _x = xscale[s]
         _data = data[s]
         params,error,resid = fitFlatTopGaussian(_x,_data,guess,plot=True,verbose=False)
@@ -40,14 +40,14 @@ def shiftFlatTop(xscale,data,method=1):
         x_shift = xscale - mean
     else:
         loc,width,height = genGuessGaussian(xscale,data)
-        guess = [width/2,width/2,loc,height*width,0,height/1.1]
+        guess = [width/3,width/3.5,loc,2*height*width,0,0]
         peak_idx,properties = find_peaks(data, height =np.amax(data))
         width_info = peak_widths(data,peak_idx)
         width_idx = width_info[0]
         s = slice(int(peak_idx-3*width_idx),int(peak_idx+3*width_idx))
         _x = xscale[s]
         _data = data[s]
-        params,error,resid = fitFlatTopVoigt(_x,_data,guess,plot=True,verbose=False)
+        params,error,resid = fitVoigtLinBG(_x,_data,guess,plot=True,verbose=False)
         mean = params[2]
         x_shift = xscale - mean
     return x_shift
@@ -60,6 +60,7 @@ def shiftFlatTop(xscale,data,method=1):
 def fitFunction(xscale,data,function,guess,sigma,plot,bounds=None):
     xscale = np.array(xscale)
     data = np.array(data)
+    guess = np.array(guess).astype(float)
     if bounds==None:
         bounds = (-np.inf,np.inf)
     try:
@@ -73,6 +74,10 @@ def fitFunction(xscale,data,function,guess,sigma,plot,bounds=None):
             plotFitResiduals(xscale,residuals,sigma)
     except RuntimeError:
         print("Error - curve_fit failed")
+        print(guess)
+        plt.figure()
+        plt.plot(xscale,data)
+        plt.plot(xscale,function(xscale,*guess))
         params = []
         perr = []
         residuals = []
@@ -98,6 +103,27 @@ def fitFlatTopVoigt(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=F
         print('Fit error = ',error)
         print('FIT PARAMS = ',params)
     return [params,error,residuals]
+
+def fitVoigtLinBG(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=False):
+    bounds = ([0,0,-np.inf,-np.inf,-np.inf,-np.inf],[abs(xscale).max(),abs(xscale).max(),np.inf,np.inf,np.inf,np.inf])
+    function = voigtLinBG
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
+    if verbose:
+        print('\n')
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+    return [params,error,residuals]
+
+def fitVoigt(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=False):
+    bounds = ([0,0,-np.inf,-np.inf,-np.inf],[abs(xscale).max(),abs(xscale).max(),np.inf,np.inf,np.inf])
+    function = voigt
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
+    if verbose:
+        print('\n')
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+    return [params,error,residuals]
+
 
 
 def fitInvertedLine(x,y,guess,xsigma,plot,verbose):
@@ -151,6 +177,17 @@ def fitGaussian(xscale, data,guess=[100,0,0.16,0],sigma=None,plot=True,verbose=F
         print('FIT PARAMS = ',params)
         print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
     return [params,error,residuals]
+
+def fitGaussianLinBG(xscale, data,guess=[100,0,0.16,0,0],sigma=None,plot=True,verbose=False):
+    function = gaussianLinBG
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot)
+    if verbose:
+        print('\n')
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+        print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
+    return [params,error,residuals]
+
 
 def fit3Gaussians(xscale, data,mean_guess,stdev_guess,norm_guess,offset_guess=[0],sigma=None,plot=True,verbose=False):
     guess = list(stdev_guess) + list(mean_guess) + list(norm_guess)+list(offset_guess)
@@ -258,6 +295,10 @@ def gaussian(x,a,b,n,c): # n exp(-(x-b)^2/(2a^2)) + c
     value= n*np.exp(-(x-b)**2/(2*a**2))+c
     return value
 
+def gaussianLinBG(x,a,b,n,m,c): # n exp(-(x-b)^2/(2a^2)) + m*x+c
+    value= n*np.exp(-(x-b)**2/(2*a**2))+line(x,m,c)
+    return value
+
 def flatTopFunction(x,function,func_params,threshold): # piece wise function. f(x)=f(x) when f(x)<s, otherwise f(x)=s
     value = function(x,*func_params)
     value[value>threshold]=threshold
@@ -272,7 +313,11 @@ def flatVoigt(x,lor,sig,mean,n,c,threshold):
     return flatTopFunction(x,voigt,params,threshold)
 
 def voigt(x,lor,sig,mean,n,c):
-    value = n*np.real(wofz(((x-mean)+1j*lor)/(sig*np.sqrt(2))))/(sig*np.sqrt(2*np.pi))
+    value = n*np.real(wofz(((x-mean)+1j*lor)/(sig*np.sqrt(2))))/(sig*np.sqrt(2*np.pi))+c
+    return value
+
+def voigtLinBG(x,lor,sig,mean,n,m,b):
+    value = n*np.real(wofz(((x-mean)+1j*lor)/(sig*np.sqrt(2))))/(sig*np.sqrt(2*np.pi))+line(x,m,b)
     return value
 
 def lorentzian(x, gamma):

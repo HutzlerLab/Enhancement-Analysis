@@ -333,11 +333,73 @@ def averageSpectra(freq_array,spectra_array,bin_size=10):
                 if bins[i] <= freq_array[j][k] < bins[i] + bin_size:
                     _sum[i]+= spectra_array[j][k]
                     num_avg[i]+=1
+    num_avg[num_avg<1]=1
     avg_spectra = _sum/num_avg
     return [bins,avg_spectra]
 
 
-def processBackAndForth(Yb_spectra,YbOH_spectra,time_array,chirp_speed,num_peaks,initial_up):
+def processBUBArray(folder,start_stop_array, skips = [],indep_var = [],plot=True):
+    n = len(start_stop_array)
+    if not indep_var:
+    	indep_var = np.arange(n)
+    b_dataset = []
+    ub_dataset = []
+    for i in range(n):
+        start,stop = start_stop_array[i]
+        #OD time series, parameters
+        ODs_1 = calculateSeriesOD(folder,start,stop,skips,ABAB=ABAB)
+        ODs_2 = calculateSeriesOD(folder,start+1,stop,skips,ABAB=ABAB)
+
+        #Integrated ODs, timestamps
+        p_1 = processData(ODs_1,[0,8])
+        p_2 = processData(ODs_2,[0,8])
+
+        if plot:
+            plt.figure()
+            plt.title('Yb Integrated ODs')
+            plt.plot(p_1[2],p_1[1],label='i={}'.format(i))
+
+        b,ub = identifyBUB(p_1,p_2)
+        b_dataset.append(b)
+        ub_dataset.append(ub)
+    return [b_dataset,ub_dataset]
+
+
+def processBackAndForth(blocked_dataset,unblocked_dataset,chirp_speed,initial_array,num_peaks_array):
+    n = len(num_peaks_array)
+    YbOH = [] #blocked,unblocked
+    Yb = []
+    freq = []
+    enhancement = []
+    avg_freq = []
+
+    for i in range(n):
+        unblocked = blocked_dataset[i]
+        blocked = unblocked_dataset[i]
+        num_peaks = num_peaks_array[i]
+        initial_up = initial_array[i]
+        ub_split= processBackAndForth(unblocked[1],unblocked[0],unblocked[2],speed,num_peaks,initial_up)
+        b_split= processBackAndForth(blocked[1],blocked[0],blocked[2],speed,num_peaks,initial_up)
+        [_YbOH_b,_Yb_b,_freq_b],[_YbOH_ub,_Yb_ub,_freq_ub] = matchBUB(b_split,ub_split)
+        _en = []
+        for _b_single,_ub_single in zip(_YbOH_b,_YbOH_ub):
+            _en_single = calcEnhancement(_b_single,_ub_single)
+            _en.append(_en_single)
+        enhancement.append(_en)
+        YbOH.append([_YbOH_b,_YbOH_ub])
+        Yb.append([_Yb_b,_Yb_ub])
+        _avg = []
+        for _b,_ub in zip(_freq_b,_freq_ub):
+            _avg.append((_b+_ub)/2)
+        freq.append([_freq_b,_freq_ub])
+        avg_freq.append(_avg)
+        YbOH.append([_YbOH_b,_YbOH_ub])
+        Yb.append([_Yb_b,_Yb_ub])
+        freq.append([_freq_b,_freq_ub])
+    return [enhancement,YbOH,Yb,avg_freq]
+
+
+def calibrateBackAndForth(Yb_spectra,YbOH_spectra,time_array,chirp_speed,num_peaks,initial_up):
     Yb = np.array(Yb_spectra)
     YbOH = np.array(YbOH_spectra)
     times = np.array(time_array)

@@ -69,6 +69,9 @@ def importRawData(filepath,usecols=(1,2)):
     except ValueError:
         print('Issues with file located at: ',filepath)
         raw_data = [np.zeros(10000),np.zerps(10000)]
+    except OSError:
+        print('Issues with file located at: ',filepath)
+        raw_data = [np.zeros(10000),np.zerps(10000)]
     return raw_data
 
 '''Grab trace parameters from single cleverscope text file'''
@@ -119,7 +122,8 @@ def raw2OD(raw_data,time_ms):
     offset = raw_data[:beforeYAG_index].mean()
     #Smooth the data
     smoothed_data = smooth(raw_data,window=60)
-    smoothed_data[smoothed_data<0] = 0.00001
+    floor = smoothed_data[smoothed_data>0].min()
+    smoothed_data[smoothed_data<0] = floor
     #Calculate OD, fix floating point errors
     OD = np.log(offset/smoothed_data)
     if OD[trigger_index]<0:
