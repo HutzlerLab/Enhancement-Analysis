@@ -129,12 +129,13 @@ def importCleverParams(filepath):
     return params
 
 '''Generate filepath for single text file named "spectra_num.txt"'''
-def genPath(root_folder,num):
+def genPath(folder,num,filename='spectra_',data_folder='Raw_Data'):
     num_str = str(num)
-    name = 'spectra_'
-    file =  name + num_str + '.txt'
+    file =  filename + num_str + '.txt'
     #path is given from current working directory
-    filepath = pathlib.Path.cwd() / root_folder / file
+    cwd = pathlib.Path.cwd()
+    data_dir = cwd.parents[0] / data_folder
+    filepath = data_dir / folder / file
     return filepath
 
 '''From a single file location, obtain dataset with raw data and associated parameters'''
