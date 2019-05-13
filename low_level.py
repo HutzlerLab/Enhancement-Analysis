@@ -37,7 +37,18 @@ def calculateSingleOD(root_folder,num,ch=3):
         ODs = [single_ch]
     return [ODs,params]
 
-
+'''Calculate the optical depth (OD) signal from a single text file.
+    Returns a dataset, which consists of the optical dpeth and acquisition parameters'''
+def calculateSingleFluor(root_folder,num,ch=3):
+    raw_traces,params = file2dataset(root_folder,num)
+    if ch == 3: #Get both channels
+        ch1 = raw2fluor(np.array(raw_traces[0]),timeArray(params))
+        ch2 = raw2fluor(np.array(raw_traces[1]),timeArray(params))
+        fluor = [ch1,ch2]
+    else:
+        single_ch = raw2fluor(np.array(raw_traces[ch-1]),timeArray(params))
+        fluor = [single_ch]
+    return [fluor,params]
 
 ##Sub-functions##
 
@@ -51,12 +62,33 @@ def writeCSVrows(array_of_arrays,filepath):
     print('Done! Array written to', filepath)
     return
 
-def readCSVrows(filepath):
+def isFloat(value):
+    try:
+        float(value)
+        return True
+    except:
+        return False
+
+def readCSVrows(filepath,skip_header=0):
+    header = []
     with open(filepath,'r') as f:
         r = csv.reader(f)
-        rows = np.array([np.array([float(value) for value in row]) for row in r])
+        for i in range(skip_header):
+            header.append(next(r))
+        rows = np.array([np.array([float(value) if isFloat(value) else value for value in row],dtype=object) for row in r])
     print('Done! Array read from', filepath)
-    return rows
+    return rows,header
+
+def readCSVcolumns(filepath,skip_header=0):
+    header = []
+    with open(filepath,'r') as f:
+        r = csv.reader(f)
+        for i in range(skip_header):
+            header.append(next(r))
+        rows = np.array([np.array([float(value) if isFloat(value) else value for value in row],dtype=object) for row in r])
+    columns = rows.T
+    print('Done! Array read from', filepath)
+    return columns,header
 
 '''Import raw traces from data columns in single cleverscope text file'''
 def importRawData(filepath,usecols=(1,2)):
@@ -130,6 +162,18 @@ def raw2OD(raw_data,time_ms):
         offset = smoothed_data[trigger_index]
         OD = np.log(offset/smoothed_data)
     return OD
+
+def raw2fluor(raw_data,time_ms):
+    trigger_index = np.searchsorted(time_ms,0)
+    beforeYAG_index = np.searchsorted(time_ms,-0.1)
+    #Calculate DC offset, convert signal to OD
+    offset = raw_data[:beforeYAG_index].mean()
+    #Smooth the data
+    smoothed_data = smooth(raw_data,window=60)
+    smoothed_data-=offset
+    #Calculate OD, fix floating point errors
+    return smoothed_data
+
 
 '''Function for smoothing data. Currently uses Savitzky-Golay filter, which fits a window
     onto a polynomial of some order, and then uses the polynomial to estimate the value'''

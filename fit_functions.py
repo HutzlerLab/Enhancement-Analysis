@@ -260,20 +260,20 @@ def genGuess3Gaussians(xscale, data):
 def plotFitComparison(xscale,data,function,params,sigma,xlabel=None,ylabel=None):
     plt.figure()
     plt.title('Fit vs Data')
-    if sigma:
-        plt.errorbar(xscale,data,yerr=sigma,label='Data',marker='o',linestyle='None')
-    else:
+    if sigma is None:
         plt.plot(xscale,data,label='Data',marker='o')
+    else:
+        plt.errorbar(xscale,data,yerr=sigma,label='Data',marker='o',linestyle='None')
     plt.plot(xscale,function(xscale,*params),label='Fit')
     return
 
 def plotFitResiduals(xscale,residuals,sigma):
     plt.figure()
     plt.title('Fit Residuals')
-    if sigma:
-        plt.errorbar(xscale,residuals,yerr=sigma,marker='o',linestyle='None')
-    else:
+    if sigma is None:
         plt.plot(xscale,residuals,'o',linestyle='None')
+    else:
+        plt.errorbar(xscale,residuals,yerr=sigma,marker='o',linestyle='None')
     plt.plot(xscale,np.zeros(len(xscale)),linestyle='--')
     return
 
@@ -312,8 +312,9 @@ def flatVoigt(x,lor,sig,mean,n,c,threshold):
     params = [lor,sig,mean,n,c]
     return flatTopFunction(x,voigt,params,threshold)
 
-def voigt(x,lor,sig,mean,n,c):
-    value = n*np.real(wofz(((x-mean)+1j*lor)/(sig*np.sqrt(2))))/(sig*np.sqrt(2*np.pi))+c
+def voigt(x,lor,sig,mean,n,c): #lor = hwhm, sigma = gaussian stdev
+    z= ((x-mean) + 1j*lor)/(sig*np.sqrt(2))
+    value = n*np.real(wofz(z))/(sig*np.sqrt(2*np.pi))+c
     return value
 
 def voigtLinBG(x,lor,sig,mean,n,m,b):

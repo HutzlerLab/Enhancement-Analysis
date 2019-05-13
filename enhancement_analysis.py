@@ -34,8 +34,8 @@ def calculateSeriesOD(folder,start_num,stop_num,skips=[], ch=3, ABAB = False, AB
     Ch1_ODs = []
     Ch2_ODs = []
     params = []
-    progress = widgets.FloatProgress(value=0.0, min=0.0, max=1.0)
-    display(progress)
+    #progress = widgets.FloatProgress(value=0.0, min=0.0, max=1.0)
+    #display(progress)
     delta = 1
     index = -1
     if ABAB:
@@ -69,8 +69,8 @@ def calculateSeriesOD(folder,start_num,stop_num,skips=[], ch=3, ABAB = False, AB
         elif ch==2:
             Ch2_ODs.append(_ODs[0])
         params.append(_params)
-        progress.value = float(i-start_num+1)/(stop_num-start_num)
-    progress.value=1
+        #progress.value = float(i-start_num+1)/(stop_num-start_num)
+    #progress.value=1
     if ch==1:
         dataset = [np.array(Ch1_ODs),np.array(params)]
     if ch==2:
@@ -97,38 +97,38 @@ def integrateODSeries(ODs,parameters,start_stop=[0,6],fignum=1):
 
 
 '''Returns integrated ODs and array of timestamps. Useful for chirp analysis'''
-def processData(dataset, start_stop=[0,6]):
-    YbOH_fig = 1
-    plt.figure(YbOH_fig)
-    plt.title('YbOH OD')
+def processData(dataset, start_stop=[0,8]):
+    Ch1_fig = 1
+    plt.figure(Ch1_fig)
+    plt.title('Ch1 OD')
     plt.xlabel('Time (ms)')
     plt.ylabel('OD')
 
-    Yb_fig = 2
-    plt.figure(Yb_fig)
-    plt.title('Yb OD')
+    Ch2_fig = 2
+    plt.figure(Ch2_fig)
+    plt.title('Ch2 OD')
     plt.xlabel('Time (ms)')
     plt.ylabel('OD')
 
     params = dataset[-1]
     if len(dataset) == 3:
-        YbOH_ODs = dataset[0]
-        Yb_ODs = dataset[1]
-        Skip_Yb=False
+        Ch1_ODs = dataset[0]
+        Ch2_ODs = dataset[1]
+        Skip_Ch2=False
     else:
-        YbOH_ODs = dataset[0]
-        Skip_Yb = True
+        Ch2_ODs = dataset[0]
+        Skip_Ch2 = True
 
-    YbOH_int_ODs = integrateODSeries(YbOH_ODs,params,start_stop,fignum=YbOH_fig)
+    Ch1_int_ODs = integrateODSeries(Ch1_ODs,params,start_stop,fignum=Ch1_fig)
     times = extractTimestamps(params)
-    sorted_YbOH_int = sortData(times,YbOH_int_ODs)
+    sorted_Ch1_int = sortData(times,Ch1_int_ODs)
     sorted_times = sorted(times)
-    if Skip_Yb:
-        results = [np.array(sorted_YbOH_int), np.array(sorted_times)]
+    if Skip_Ch2:
+        results = [np.array(sorted_Ch1_int), np.array(sorted_times)]
     else:
-        Yb_int_ODs = integrateODSeries(Yb_ODs,params,start_stop,fignum=Yb_fig)
-        sorted_Yb_int = sortData(times,Yb_int_ODs)
-        results = [np.array(sorted_YbOH_int), np.array(sorted_Yb_int), np.array(sorted_times)]
+        Ch2_int_ODs = integrateODSeries(Ch2_ODs,params,start_stop,fignum=Ch2_fig)
+        sorted_Ch2_int = sortData(times,Ch2_int_ODs)
+        results = [np.array(sorted_Ch1_int), np.array(sorted_Ch2_int), np.array(sorted_times)]
     return results
 
 def processChirpWithBounds(dataset,freq_start,freq_stop, start_stop=[0,6]):
@@ -333,73 +333,11 @@ def averageSpectra(freq_array,spectra_array,bin_size=10):
                 if bins[i] <= freq_array[j][k] < bins[i] + bin_size:
                     _sum[i]+= spectra_array[j][k]
                     num_avg[i]+=1
-    num_avg[num_avg<1]=1
     avg_spectra = _sum/num_avg
     return [bins,avg_spectra]
 
 
-def processBUBArray(folder,start_stop_array, skips = [],indep_var = [],plot=True):
-    n = len(start_stop_array)
-    if not indep_var:
-    	indep_var = np.arange(n)
-    b_dataset = []
-    ub_dataset = []
-    for i in range(n):
-        start,stop = start_stop_array[i]
-        #OD time series, parameters
-        ODs_1 = calculateSeriesOD(folder,start,stop,skips,ABAB=ABAB)
-        ODs_2 = calculateSeriesOD(folder,start+1,stop,skips,ABAB=ABAB)
-
-        #Integrated ODs, timestamps
-        p_1 = processData(ODs_1,[0,8])
-        p_2 = processData(ODs_2,[0,8])
-
-        if plot:
-            plt.figure()
-            plt.title('Yb Integrated ODs')
-            plt.plot(p_1[2],p_1[1],label='i={}'.format(i))
-
-        b,ub = identifyBUB(p_1,p_2)
-        b_dataset.append(b)
-        ub_dataset.append(ub)
-    return [b_dataset,ub_dataset]
-
-
-def processBackAndForth(blocked_dataset,unblocked_dataset,chirp_speed,initial_array,num_peaks_array):
-    n = len(num_peaks_array)
-    YbOH = [] #blocked,unblocked
-    Yb = []
-    freq = []
-    enhancement = []
-    avg_freq = []
-
-    for i in range(n):
-        unblocked = blocked_dataset[i]
-        blocked = unblocked_dataset[i]
-        num_peaks = num_peaks_array[i]
-        initial_up = initial_array[i]
-        ub_split= processBackAndForth(unblocked[1],unblocked[0],unblocked[2],speed,num_peaks,initial_up)
-        b_split= processBackAndForth(blocked[1],blocked[0],blocked[2],speed,num_peaks,initial_up)
-        [_YbOH_b,_Yb_b,_freq_b],[_YbOH_ub,_Yb_ub,_freq_ub] = matchBUB(b_split,ub_split)
-        _en = []
-        for _b_single,_ub_single in zip(_YbOH_b,_YbOH_ub):
-            _en_single = calcEnhancement(_b_single,_ub_single)
-            _en.append(_en_single)
-        enhancement.append(_en)
-        YbOH.append([_YbOH_b,_YbOH_ub])
-        Yb.append([_Yb_b,_Yb_ub])
-        _avg = []
-        for _b,_ub in zip(_freq_b,_freq_ub):
-            _avg.append((_b+_ub)/2)
-        freq.append([_freq_b,_freq_ub])
-        avg_freq.append(_avg)
-        YbOH.append([_YbOH_b,_YbOH_ub])
-        Yb.append([_Yb_b,_Yb_ub])
-        freq.append([_freq_b,_freq_ub])
-    return [enhancement,YbOH,Yb,avg_freq]
-
-
-def calibrateBackAndForth(Yb_spectra,YbOH_spectra,time_array,chirp_speed,num_peaks,initial_up):
+def processBackAndForth(Yb_spectra,YbOH_spectra,time_array,chirp_speed,num_peaks,initial_up):
     Yb = np.array(Yb_spectra)
     YbOH = np.array(YbOH_spectra)
     times = np.array(time_array)
@@ -471,22 +409,31 @@ def splitData(YbOH,Yb,times,num_peaks,initial_up):
     print(_sum)
     return [YbOH_split,Yb_split,times_split]
 
-def identifyBUB(a1,a2,equal=False):
+
+def identifyBUB(a1,a2,ch=1,equal=False,returnBool=False):
     _a1 = a1
     _a2 = a2
+    ch = ch-1
     if equal:
         delta = len(a1[0]) - len(a2[0])
         if delta > 0:
             _a1 = [a1[i][:-delta] for i in range(len(a1))]
         elif delta < 0:
             _a2 = [a2[i][:-delta] for i in range(len(a2))]
-    if _a1[0].mean() > _a2[0].mean():
+    if _a1[ch].mean() > _a2[ch].mean():
         unblocked = _a1
         blocked = _a2
+        if returnBool:
+            firstBlocked = False
     else:
         unblocked = _a2
         blocked = _a1
-    return [blocked,unblocked]
+        if returnBool:
+            firstBlocked=True
+    if returnBool:
+        return [blocked,unblocked,firstBlocked]
+    else:
+        return [blocked,unblocked]
 
 def matchBUB(blocked,unblocked):
     b_match = []
@@ -505,5 +452,6 @@ def matchBUB(blocked,unblocked):
         b_match.append(_b_split)
         ub_match.append(_ub_split)
     return [b_match,ub_match]
+
 
 #################################################################################################################################
