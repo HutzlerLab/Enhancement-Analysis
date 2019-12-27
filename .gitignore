@@ -1,8 +1,1 @@
-*
-*/
-!.gitignore
-!README.md
-!*.ipynb
-!*.py
-!Old_Code
-!Analysis
+__pycache__
