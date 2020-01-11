@@ -267,16 +267,35 @@ def raw2OD(raw_data,time_ms):
         OD = np.log(offset/smoothed_data)
     return OD
 
-def read_raw_file(data_folder,num,print_bool=False,root_folder='Raw_Data',file_name='spectra_'):
-    '''From a single file location, obtain dataset with raw data and metadata.
+def read_raw_file(folder_path,num,file_name,type='PXI',print_bool=False):
+    '''From a single folder location, obtain dataset with raw data and metadata.
     For full info, see documentation of process_single_data_file().
     '''
-    filepath = gen_data_filepath(data_folder,num,)
+    file_path = gen_data_filepath(folder_path,num,file_name)
     if print_bool:
-        print(filepath)
-    data = import_raw_data_cleverscope(filepath)
-    parameters = import_params_Cleverscope(filepath)
-    return [data,parameters]
+        print(file_path)
+	if type == 'PXI':
+		meta = import_metadata_PXI(file_path)
+		raw = import_raw_data_PXI(file_path)
+	elif type == 'Cleverscope':
+		meta = import_metadata_Cleverscope(file_path)
+		raw = import_raw_data_Cleverscope(filepath)
+    return [raw,meta]
+
+
+def import_raw_data_PXI(filepath,header_lines = 30):
+    '''Imports raw traces from data columns in single PXI text file.
+    Input is file path.'''
+    try:
+        arr = np.genfromtxt(filepath,delimiter='', skip_header = header_lines)
+        raw_data = [ch for ch in arr.T]
+    except ValueError:
+        print('Issues with file located at: ',filepath)
+        raw_data = [np.zeros(10000),np.zeros(10000)]
+    except OSError:
+        print('Issues with file located at: ',filepath)
+        raw_data = [np.zeros(10000),np.zeros(10000)]
+    return raw_data
 
 def import_raw_data_Cleverscope(filepath,usecols=(1,2)):
     '''Imports raw traces from data columns in single cleverscope text file.
@@ -501,20 +520,16 @@ def gen_filepath_from_parent(path):
     new_path = parent_dir / path
     return new_path
 
-def gen_data_filepath(data_folder,file_num,root_folder,filename):
-    '''Generate filepath for single text file named "spectra_num.txt", located
-    in a different folder than the current working directorry.
-
-    Inputs:
-    folder:
-     '''
-    num_str = str(file_num)
-    file =  filename + num_str + '.txt'
-    local_path = root_folder / data_folder
-    #path is given from current working directory
-    full_path = gen_filepath_from_parent(local_path)
-    file_path = full_path / file
-    return file_path
+def gen_data_filepath(folder_path, num, name):
+    '''Generate file path for single text file named "name_num.txt", located
+    in the folder given by fikder_path. Note folder_path should be an absolute
+    path
+    '''
+    num_str = str(num)
+    folder_path = pathlib.Path(folder_path)
+    file =  name + num_str + '.txt'
+    full_path = folder_path / file
+    return full_path
 
 
 # Old Functions #

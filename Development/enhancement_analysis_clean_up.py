@@ -29,10 +29,14 @@ from fit_functions import *
 from low_level import *
 
 '''Each data trace has associated with it some metadata, referred to as
-"parameters". These parameters are stored in an array. The global variables
-below record which index of the parameter array correspond to which paremeter.
+"parameters". These parameters are stored in a dict. The elements are:
 
-TO BE REPLACED WITH DICTIONARIES.'''
+    dt: time step of data traces (ms)
+    start: start time of data traces, relative to trigger (ms)
+    nsample: number of elements in time series
+    trigtime: UNIX time of trigger
+'''
+
 dt_INDEX = 0
 start_INDEX = 1
 nsample_INDEX = 2
@@ -41,8 +45,55 @@ blocked_INDEX = 4
 param_LENGTH = 5
 
 ###############################################################################
-'''Processing Optical Depths'''
+'''Processing Data'''
 ###############################################################################
+
+def process_raw_data_array(data_folder,file_numbers,channel_types):
+    '''This function is used to convert a series of raw data files to
+    processed data traces. The raw data can be in the form of absorption
+    data, or fluorescence data.
+
+    Inputs:
+    folder: local path of folder containing raw data
+    file_numbers: array containing the file numbers to process
+    channel_types: a list containing the data types that label each channel.
+    For example, if channel 1 is absorption and channel 2 fluorescence, then
+    the channel_type is ['abs','fluor']
+    root_folder: parent folder containing data folder
+    file_name: name of data file. The format should be "nameXXX.txt", where
+    XXX is a number labeling the file
+
+    Outputs:
+    A list of the form [processed_data,param_array]
+    Each element in data_array and parameter_array correspond to the traces and
+    metadata obtained from a single file.
+    '''
+    param_array = []
+    data_array = []
+    for num in file_numbers:
+        processed_data, params = process_single_data_file(data_folder, num, channel_types)
+        param_array.append(params)
+        data_array.append(processed_data)
+    # data_array = np.array(data_array) # decided not to turn these into numpy arrays
+    # param_array = np.array(param_array)
+    return [data_array,param_array]
+
+def process_alternating_raw_data(data_folder,file_start_stop,channel_types):
+    '''
+    This function is used to convert large quantities of blocked/unblocked
+    raw data to ODs and integrated ODs. It takes as an input the location of
+    raw data and its corresponding metadata. Depending on the value of iterate,
+    the function will go through the raw data in different ways. For example,
+    iterate='ABAB' means the function will iterate over every other trace (A),
+    then go back and do the other set of traces (B). The function calculates an
+    OD trace and an integrated OD for each raw data file. It also sorts blocked
+    and unblocked traces.
+
+    The output is of the form [iv,b_ODs,ub_ODs,b_int,ub_int]
+    IV is the independent variable read from the metadata folder
+    b_ODs and ub_ODs have the form [Ch1_ODs, Ch2_ODs, data_parameters]
+    b_int and ub_int  have the form [Ch1_integrated, Ch2_integrated, timestamps]
+    '''
 
 '''
 This function is used to convert large quantities of blocked/unblocked
@@ -358,7 +409,7 @@ def OLD_process_fluor_OD_with_metadata(rawdata_folder,metadata_path,dtype='ABAB'
 
 
 
-def process_raw_data_array(folder,file_numbers,abs_ch,fluor_ch):
+def process_raw_data_array(data_folder,file_numbers,channel_types):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -366,14 +417,36 @@ def process_raw_data_array(folder,file_numbers,abs_ch,fluor_ch):
     Inputs:
     folder: local path of folder containing raw data
     file_numbers: array containing the file numbers to process
-    abs_ch: which channels correspond to absorption (None is an option)
-    fluor_ch: which channels correspond to fluorescence (None is an option)
+    channel_types: a list containing the data types that label each channel.
+    For example, if channel 1 is absorption and channel 2 fluorescence, then
+    the channel_type is ['abs','fluor']
+    root_folder: parent folder containing data folder
+    file_name: name of data file. The format should be "nameXXX.txt", where
+    XXX is a number labeling the file
 
     Outputs:
-
+    A list of the form [processed_data,param_array]
+    Each element in data_array and parameter_array correspond to the traces and
+    metadata obtained from a single file.
     '''
-    params = []
-    make_data_
+    param_array = []
+    data_array = []
+    for num in file_numbers:
+        processed_data, params = process_single_data_file(data_folder, num, channel_types)
+        param_array.append(params)
+        data_array.append(processed_data)
+    # data_array = np.array(data_array) # decided not to turn these into numpy arrays
+    # param_array = np.array(param_array)
+    return [data_array,param_array]
+
+
+
+    if 'fluor' in channel_types:
+        fluor_data = []
+    if 'abs' in channel_types:
+        abs_data = []
+
+    make_data
     if abs_ch is not None: # check if empty, if not then initialize
         abs_data = []
         if not (isinstance(abs_ch,np.ndarray) or isinstance(abs_ch,list)):
