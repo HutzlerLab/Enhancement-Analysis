@@ -32,8 +32,7 @@ from scipy.interpolate import splrep, splev
 
 ##Main Functions##
 
-def process_raw_data_array(data_folder,file_numbers,channel_types,
-root_folder = 'Raw_Data', file_name = 'spectra_'):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -56,7 +55,7 @@ root_folder = 'Raw_Data', file_name = 'spectra_'):
     param_array = []
     data_array = []
     for num in file_numbers:
-        processed_data, params = process_single_data_file(data_folder, num, channel_types,root_folder,file_name)
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types)
         param_array.append(params)
         data_array.append(processed_data)
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
@@ -64,7 +63,7 @@ root_folder = 'Raw_Data', file_name = 'spectra_'):
     return [data_array,param_array]
 
 
-def process_single_data_file(data_folder, file_num, channel_types,root_folder = 'Raw_Data', file_name = 'spectra_'):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI'):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -83,7 +82,7 @@ def process_single_data_file(data_folder, file_num, channel_types,root_folder = 
     Same order as channel_types.
     params: metadata associated with the data file.
     '''
-    raw_traces, params = read_raw_file(data_folder,file_num,root_folder,file_name)
+    raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ)
     time_ms = time_array(params)
     processed_traces = []
     for ch,type in enumerate(channel_types):
@@ -102,6 +101,7 @@ def time_array(parameters):
     t0 = parameters['start']
     npnts = parameters['nsample']
     time_ms = np.round(np.linspace(t0,dt*(npnts-1)+t0,npnts),decimals = 6)
+    time_ms-=parameters['YAGtrig']
     return time_ms
 
 def write_CSV_rows(data_array,file_path,labels):
@@ -267,19 +267,19 @@ def raw2OD(raw_data,time_ms):
         OD = np.log(offset/smoothed_data)
     return OD
 
-def read_raw_file(folder_path,num,file_name,type='PXI',print_bool=False):
+def read_raw_file(folder_path,num,file_name,DAQ='PXI',print_bool=False):
     '''From a single folder location, obtain dataset with raw data and metadata.
     For full info, see documentation of process_single_data_file().
     '''
     file_path = gen_data_filepath(folder_path,num,file_name)
     if print_bool:
         print(file_path)
-	if type == 'PXI':
-		meta = import_metadata_PXI(file_path)
-		raw = import_raw_data_PXI(file_path)
-	elif type == 'Cleverscope':
-		meta = import_metadata_Cleverscope(file_path)
-		raw = import_raw_data_Cleverscope(filepath)
+    if DAQ == 'PXI':
+        meta = import_metadata_PXI(file_path)
+        raw = import_raw_data_PXI(file_path)
+    elif DAQ == 'Cleverscope':
+        meta = import_metadata_Cleverscope(file_path)
+        raw = import_raw_data_Cleverscope(filepath)
     return [raw,meta]
 
 
@@ -296,6 +296,52 @@ def import_raw_data_PXI(filepath,header_lines = 30):
         print('Issues with file located at: ',filepath)
         raw_data = [np.zeros(10000),np.zeros(10000)]
     return raw_data
+
+def split_strip(string):
+    return string.split(':')[-1].strip(';')
+
+def import_metadata_PXI(filepath):
+    '''Import metadata parameters from Cleverscope file.
+
+    Parameters returned as dict:
+    dt: time step of data traces (ms)
+    start: start time of data traces, relative to trigger (ms)
+    nsample: number of elements in time series
+    trigtime: UNIX time of trigger
+    '''
+    with open(filepath, 'r') as f:
+        lines=[]
+        for i in range(30):
+            lines.append(f.readline().strip('\n'))
+    meta={}
+    for text in lines:
+        if 'cycle number' in text:
+            meta['cycle number'] = int(split_strip(text))
+        if 'iteration' in text:
+            meta['iteration'] = int(split_strip(text))
+        if 'command file' in text:
+            #note the path usually also includes a ':', so split_strip() will just drop the drive in the path
+            meta['command file'] = split_strip(text)
+        if 'comment' in text:
+            meta['comment'] = text.split(':')[1]
+        if 'wavenumber' in text:
+            if '(cm-1):' in text:
+                meta['frequency'] = float(text.split('(cm-1):')[-1].strip(';'))
+            else:
+                meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
+        if 'Channels' in text:
+            meta['channels'] = int(text.strip('\t').split('\t')[-1])
+        if 'Samples' in text:
+            meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
+        if 'Time' in text:
+            meta['trigtime'] = text.strip('Time').strip('\t').split('\t')
+        if 'Delta_X' in text:
+            meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
+        if 'X0' in text:
+            meta['start'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')][0]
+    meta['YAGtrig'] = 2
+    return meta
+
 
 def import_raw_data_Cleverscope(filepath,usecols=(1,2)):
     '''Imports raw traces from data columns in single cleverscope text file.
@@ -344,6 +390,7 @@ def import_params_Cleverscope(filepath):
             time_sec = float(text.split('\t')[1].strip())*24*3600 #convert days to seconds
             time_unix = time_sec - 2209208400
             params['trigtime']=time_unix
+    params['YAGtrig'] = 0
     return params
 
 
@@ -525,7 +572,7 @@ def gen_data_filepath(folder_path, num, name):
     in the folder given by fikder_path. Note folder_path should be an absolute
     path
     '''
-    num_str = str(num)
+    num_str = format(num,'03d')
     folder_path = pathlib.Path(folder_path)
     file =  name + num_str + '.txt'
     full_path = folder_path / file
