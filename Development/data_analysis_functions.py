@@ -32,6 +32,28 @@ from scipy.interpolate import splrep, splev
 
 ##Main Functions##
 
+def integrate_data_array(data_array,metadata_array,bounds,display=True):
+    integrated_array = []
+    for data, meta in zip(data_array, metadata_array):
+        integrated_array.append(slice_integrate(data,meta,bounds,display))
+    integrated_array = np.array(integrated_array)
+    return integrated_array
+
+def extract_frequency(metadata):
+    return np.array([meta['frequency'] for meta in metadata])
+
+def slice_integrate(data,metadata,start_stop,plot,fig_num=1):
+    time_ms = time_array(metadata)
+    start_i = np.searchsorted(time_ms,start_stop[0])
+    stop_i = np.searchsorted(time_ms,start_stop[1])
+    t = slice(start_i,stop_i)
+    dt = np.round(time_ms[1]-time_ms[0],decimals=6)
+    integrated = np.round(data[t].sum()*dt,decimals=6)
+    if plot:
+            plt.figure(fig_num)
+            plt.plot(time_ms[t],data[t])
+    return integrated
+
 def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
@@ -222,8 +244,8 @@ def raw2fluor(raw_data,time_ms):
 
 def raw2OD_wLine(raw_data,time_ms):
     trigger_index = np.searchsorted(time_ms,0)
-    beforeYAG_index = np.searchsorted(time_ms,-0.1)
-    after_abs_index = np.searchsorted(time_ms,time_ms[-1000])
+    beforeYAG_index = np.searchsorted(time_ms,-0.01)
+    after_abs_index = np.searchsorted(time_ms,time_ms[-int(len(time_ms)*0.1)])
     #Calculate linear and DC offset, convert signal to OD
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
     fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
@@ -241,6 +263,7 @@ def raw2OD_wLine(raw_data,time_ms):
     smoothed_plot = smooth(raw_data,window=60)
     floor = smoothed_plot[smoothed_plot>0].min()
     smoothed_plot[smoothed_plot<0] = floor
+    # plt.figure()
     # plt.plot(time_ms,smoothed_plot)
     # plt.plot(time_ms,line_func(time_ms,A,offset))
     #Calculate OD, fix floating point errors
@@ -338,7 +361,8 @@ def import_metadata_PXI(filepath):
         if 'Delta_X' in text:
             meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
         if 'X0' in text:
-            meta['start'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')][0]
+            meta['start'] = 0
+            meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
     meta['YAGtrig'] = 2
     return meta
 
