@@ -32,17 +32,17 @@ from scipy.interpolate import splrep, splev
 
 ##Main Functions##
 
-def integrate_data_array(data_array,metadata_array,bounds,display=True):
+def integrate_data_array(data_array,metadata_array,bounds,display=True,fig_num=1):
     integrated_array = []
     for data, meta in zip(data_array, metadata_array):
-        integrated_array.append(slice_integrate(data,meta,bounds,display))
+        integrated_array.append(slice_integrate(data,meta,bounds,display,fig_num))
     integrated_array = np.array(integrated_array)
     return integrated_array
 
 def extract_frequency(metadata):
     return np.array([meta['frequency'] for meta in metadata])
 
-def slice_integrate(data,metadata,start_stop,plot,fig_num=1):
+def slice_integrate(data,metadata,start_stop,plot,fig_num):
     time_ms = time_array(metadata)
     start_i = np.searchsorted(time_ms,start_stop[0])
     stop_i = np.searchsorted(time_ms,start_stop[1])
@@ -191,7 +191,7 @@ def read_CSV_columns(file_path,read_header=0,obj=False):
     return columns,header
 
 
-## Data Processing Subfunctions ##
+##################### Data Processing Subfunctions ############################
 
 def process_raw_fluor(raw_data,time_ms,line_background=True):
     if line_background:
@@ -210,7 +210,7 @@ def process_raw_abs(raw_data,time_ms,line_background=True):
 def raw2fluor_wLine(raw_data,time_ms):
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.1)
-    after_abs_index = np.searchsorted(time_ms,time_ms[-1000])
+    after_abs_index = np.searchsorted(time_ms,(time_ms[-1]-1))
     #Calculate linear and DC offset, convert signal to OD
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
     fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
@@ -245,7 +245,7 @@ def raw2fluor(raw_data,time_ms):
 def raw2OD_wLine(raw_data,time_ms):
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.01)
-    after_abs_index = np.searchsorted(time_ms,time_ms[-int(len(time_ms)*0.1)])
+    after_abs_index = np.searchsorted(time_ms,(time_ms[-1]-1))
     #Calculate linear and DC offset, convert signal to OD
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
     fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
@@ -298,12 +298,27 @@ def read_raw_file(folder_path,num,file_name,DAQ='PXI',print_bool=False):
     if print_bool:
         print(file_path)
     if DAQ == 'PXI':
-        meta = import_metadata_PXI(file_path)
-        raw = import_raw_data_PXI(file_path)
+        header_lines = how_big_header(file_path)
+        meta = import_metadata_PXI(file_path,header_lines=header_lines)
+        raw = import_raw_data_PXI(file_path,header_lines=header_lines)
     elif DAQ == 'Cleverscope':
         meta = import_metadata_Cleverscope(file_path)
         raw = import_raw_data_Cleverscope(filepath)
     return [raw,meta]
+
+def how_big_header(file_path):
+    with open(file_path, 'r') as f:
+        lines=[]
+        i=0
+        found_the_end = False
+        while found_the_end == False:
+            lines.append(f.readline().strip('\n'))
+            i+=1
+            for line in lines:
+                if 'X_Value' in line:
+                    found_the_end = True
+    return i
+
 
 
 def import_raw_data_PXI(filepath,header_lines = 30):
@@ -323,7 +338,7 @@ def import_raw_data_PXI(filepath,header_lines = 30):
 def split_strip(string):
     return string.split(':')[-1].strip(';')
 
-def import_metadata_PXI(filepath):
+def import_metadata_PXI(filepath,header_lines=30):
     '''Import metadata parameters from Cleverscope file.
 
     Parameters returned as dict:
@@ -334,7 +349,7 @@ def import_metadata_PXI(filepath):
     '''
     with open(filepath, 'r') as f:
         lines=[]
-        for i in range(30):
+        for i in range(header_lines):
             lines.append(f.readline().strip('\n'))
     meta={}
     for text in lines:
@@ -348,9 +363,11 @@ def import_metadata_PXI(filepath):
         if 'comment' in text:
             meta['comment'] = text.split(':')[1]
         if 'wavenumber' in text:
-            if '(cm-1):' in text:
-                meta['frequency'] = float(text.split('(cm-1):')[-1].strip(';'))
-            else:
+            if '(cm-1)(cavity):' in text:
+                meta['frequency_cavity'] = float(text.split('(cm-1)(cavity):')[-1].strip(';'))
+            elif '(cm-1)(meter):' in text:
+                meta['frequency_meter'] = float(text.split('(cm-1)(meter):')[-1].strip(';'))
+            elif '(cm-1):' in text:
                 meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
         if 'Channels' in text:
             meta['channels'] = int(text.strip('\t').split('\t')[-1])
@@ -590,6 +607,25 @@ def gen_filepath_from_parent(path):
     parrent_dir = current.parents[0]
     new_path = parent_dir / path
     return new_path
+
+
+def find_last_file(folder_path,file_name,initial=1):
+    return recursive_last_file(folder_path,initial,file_name)
+
+def recursive_last_file(folder_path,num,file_name):
+    try:
+        file= open(gen_data_filepath(folder_path,num,file_name))
+        file.close()
+        return recursive_last_file(folder_path,num+1,file_name)
+    except FileNotFoundError:
+        return num-1
+
+def extract_cavity(metadata):
+    return np.array([meta['frequency_cavity'] for meta in metadata])
+
+def extract_meter(metadata):
+    return np.array([meta['frequency_meter'] for meta in metadata])
+
 
 def gen_data_filepath(folder_path, num, name):
     '''Generate file path for single text file named "name_num.txt", located
