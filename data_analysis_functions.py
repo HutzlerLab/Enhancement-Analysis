@@ -358,8 +358,7 @@ def import_metadata_PXI(filepath,header_lines=30):
         if 'iteration' in text:
             meta['iteration'] = int(split_strip(text))
         if 'command file' in text:
-            #note the path usually also includes a ':', so split_strip() will just drop the drive in the path
-            meta['command file'] = split_strip(text)
+            meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
         if 'comment' in text:
             meta['comment'] = text.split(':')[1]
         if 'wavenumber' in text:
