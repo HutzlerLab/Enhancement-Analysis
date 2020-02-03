@@ -347,6 +347,7 @@ def import_metadata_PXI(filepath,header_lines=30):
     nsample: number of elements in time series
     trigtime: UNIX time of trigger
     '''
+    Time_Read = 0
     with open(filepath, 'r') as f:
         lines=[]
         for i in range(header_lines):
@@ -372,8 +373,16 @@ def import_metadata_PXI(filepath,header_lines=30):
             meta['channels'] = int(text.strip('\t').split('\t')[-1])
         if 'Samples' in text:
             meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
-        if 'Time' in text:
-            meta['trigtime'] = text.strip('Time').strip('\t').split('\t')
+        if 'Time\t' in text:
+        	if Time_Read == 1:
+        		H_M_S = text.strip('Time\t').split('\t')[0].split(':')
+        		hours_in_sec = float(H_M_S[0])*60*60
+        		min_in_sec = float(H_M_S[1])*60
+        		sec = float(H_M_S[2])
+        		meta['trigtime'] = hours_in_sec+min_in_sec+sec
+        		Time_Read+=1
+        	else:
+        		Time_Read+=1
         if 'Delta_X' in text:
             meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
         if 'X0' in text:
