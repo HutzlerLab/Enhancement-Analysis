@@ -83,6 +83,18 @@ def fitFunction(xscale,data,function,guess,sigma,plot,bounds=None):
         residuals = []
     return [params,perr,residuals]
 
+def fit_exponential_decay(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=False):
+    function = exp_decay
+    params,error,residuals = fitFunction(xscale,data,function,guess,sigma,plot,bounds=bounds)
+    if verbose:
+        print('Fit error = ',error)
+        print('FIT PARAMS = ',params)
+        print('Time constant = {} +/- {}'.format(params[1],error[1]))
+        print('\n')
+    return [params,error,residuals]
+
+
+
 def fitFlatTopGaussian(xscale,data,guess,sigma=None,bounds=None,plot=True,verbose=False):
     bounds = ([0,-np.inf,-np.inf,-np.inf,data.max()/2],[abs(xscale[-1]-xscale[0]),np.inf,np.inf,np.inf,np.inf])
     function = flatGaussian
@@ -283,6 +295,10 @@ def plotFitResiduals(xscale,residuals,sigma):
 '''f(x) = x Functions'''
 ###############################################################################
 # Note these only work with numpy array inputs for x
+
+def exp_decay(x,a,t,c):
+    value = a*np.exp(-x/t)+c
+    return value
 
 def line(x,m,b):
     value = m*x+b
