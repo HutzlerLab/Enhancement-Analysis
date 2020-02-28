@@ -369,6 +369,8 @@ def import_metadata_PXI(filepath,header_lines=30):
                 meta['frequency_meter'] = float(text.split('(cm-1)(meter):')[-1].strip(';'))
             elif '(cm-1):' in text:
                 meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
+        if 'Cavity offset(MHz)' in text:
+            meta['cavity_offset'] = float(split_strip(text))
         if 'Channels' in text:
             meta['channels'] = int(text.strip('\t').split('\t')[-1])
         if 'Samples' in text:
