@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from scipy.optimize import curve_fit
 from scipy.interpolate import splrep, splev
+from scipy.fftpack import rfftfreq, rfft,irfft
 
 '''Each data trace has associated with it some metadata, referred to as
 "parameters". These parameters are stored in a dict. The elements are:
@@ -54,7 +55,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -77,7 +78,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,):
     param_array = []
     data_array = []
     for num in file_numbers:
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types)
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth)
         param_array.append(params)
         data_array.append(processed_data)
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
@@ -85,7 +86,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,):
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI'):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -109,7 +110,7 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     processed_traces = []
     for ch,type in enumerate(channel_types):
         if type == 'abs':
-            abs_trace = process_raw_abs(raw_traces[ch], time_ms)
+            abs_trace = process_raw_abs(raw_traces[ch], time_ms,plot=plot,smooth=smooth)
             processed_traces.append(abs_trace)
         elif type == 'fluor':
             fluor_trace = process_raw_fluor(raw_traces[ch],time_ms)
@@ -146,7 +147,7 @@ def write_CSV_rows(data_array,file_path,labels):
     return
 
 
-def read_CSV_rows(full_path,read_header=0,obj=False):
+def read_CSV_rows(file_path,read_header=0,obj=False):
     '''Reads rows of data from CSV file. Returns [data,header]
 
     Inputs:
@@ -159,7 +160,7 @@ def read_CSV_rows(full_path,read_header=0,obj=False):
     if obj:
         data_type='object'
     header = []
-    with open(full_path,'r') as f:
+    with open(file_path,'r') as f:
         r = csv.reader(f)
         for i in range(read_header):
             header.append(next(r))
@@ -179,15 +180,14 @@ def read_CSV_columns(file_path,read_header=0,obj=False):
     data_type = 'float'
     if obj:
         data_type='object'
-    full_path = processed_data_filepath(file_path)
     header = []
-    with open(full_path,'r') as f:
+    with open(file_path,'r') as f:
         r = csv.reader(f)
         for i in range(read_header):
             header.append(next(r))
         rows = np.array([np.array([float(value) if isFloat(value) else value for value in row],dtype=data_type) for row in r])
     columns = rows.T
-    print('Done! Array read from', full_path)
+    print('Done! Array read from', file_path)
     return columns,header
 
 
@@ -200,9 +200,9 @@ def process_raw_fluor(raw_data,time_ms,line_background=True):
         processed_trace = raw2fluor(raw_data,time_ms)
     return processed_trace
 
-def process_raw_abs(raw_data,time_ms,line_background=True):
+def process_raw_abs(raw_data,time_ms,line_background=True,plot=False,smooth=False):
     if line_background:
-        processed_trace = raw2OD_wLine(raw_data,time_ms)
+        processed_trace = raw2OD_wLine(raw_data,time_ms,plot,smooth)
     else:
         processed_trace = raw2OD(raw_data,time_ms)
     return processed_trace
@@ -215,8 +215,9 @@ def raw2fluor_wLine(raw_data,time_ms):
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
     fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
     popt, pcov = curve_fit(line_func, fit_time , fit_data,p0=[(fit_data[-1]-fit_data[0])/(time_ms[-1]-time_ms[0]),fit_data.mean()])
-    A=popt[0]
-    offset=popt[1]
+    slope=popt[0]
+    intercept=popt[1]
+    offset = line_func(time_ms[trigger_index],slope,intercept)
     flat_data=np.zeros(len(raw_data))
     for i in range(len(raw_data)):
         flat_data[i]=raw_data[i]-(line_func(time_ms[i],A,offset)-offset)
@@ -242,7 +243,7 @@ def raw2fluor(raw_data,time_ms):
     #Calculate OD, fix floating point errors
     return smoothed_data
 
-def raw2OD_wLine(raw_data,time_ms):
+def raw2OD_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.01)
     after_abs_index = np.searchsorted(time_ms,(time_ms[-1]-1))
@@ -250,28 +251,69 @@ def raw2OD_wLine(raw_data,time_ms):
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
     fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
     popt, pcov = curve_fit(line_func, fit_time , fit_data,p0=[(fit_data[-1]-fit_data[0])/(time_ms[-1]-time_ms[0]),fit_data.mean()])
-    A=popt[0]
-    offset=popt[1]
-    flat_data=np.zeros(len(raw_data))
-    for i in range(len(raw_data)):
-        flat_data[i]=raw_data[i]-(line_func(time_ms[i],A,offset)-offset)
-    #offset = raw_data[:beforeYAG_index].mean()
+    slope=popt[0]
+    intercept=popt[1]
+    # offset1 = raw_data[trigger_index-20:trigger_index+30].mean()
+    flat_data = raw_data-line_func(time_ms,slope,intercept)+intercept
+    offset = line_func(time_ms[trigger_index],slope,intercept)
     #Smooth the data
-    smoothed_data = smooth(flat_data,window=60)
-    floor = smoothed_data[smoothed_data>0].min()
-    smoothed_data[smoothed_data<0] = floor
-    smoothed_plot = smooth(raw_data,window=60)
-    floor = smoothed_plot[smoothed_plot>0].min()
-    smoothed_plot[smoothed_plot<0] = floor
-    # plt.figure()
-    # plt.plot(time_ms,smoothed_plot)
-    # plt.plot(time_ms,line_func(time_ms,A,offset))
+    if smooth_bool:
+        zero_offset_data = flat_data-offset
+        #smoothed_data = smooth(flat_data,window=60)
+        smoothed_data = filt(zero_offset_data,time_ms,plot=plot)
+        # floor = smoothed_data[smoothed_data>0].min()
+        # smoothed_data[smoothed_data<0] = floor
+        # smoothed_plot = smooth(raw_data,window=60)
+        # floor = smoothed_plot[smoothed_plot>0].min()
+        # smoothed_plot[smoothed_plot<0] = floor
+        final_data = smoothed_data+offset
+    else:
+        final_data = flat_data
+
+    OD = np.log(offset/final_data)
+    # if OD[trigger_index]<0:
+    #     offset = final_data[trigger_index-50:trigger_index+5].mean()
+    #     OD = np.log(offset/final_data)
+    if plot:
+        plt.figure(1)
+        plt.plot(time_ms,final_data)
+        plt.figure(2)
+        plt.plot(time_ms,OD)
     #Calculate OD, fix floating point errors
-    OD = np.log(offset/smoothed_data)
-    if OD[trigger_index]<0:
-        offset = smoothed_data[trigger_index]
-        OD = np.log(offset/smoothed_data)
     return OD
+
+def filt(x,t,plot=False):
+    fy,y= spectrum(x, t)
+    N = t.size
+    if plot:
+        plt.subplot(211)
+        plt.plot(t,x)
+        plt.grid(True)
+        plt.subplot(212)
+        y_a = np.abs(y)/N*2 # Scale accordingly
+        plt.plot(fy, y_a)
+        plt.grid(True)
+        plt.show()
+    y_filt = notch_filter(fy,y)
+    x_filt = irfft(y_filt)
+    return x_filt
+
+def notch_filter(x,y,range_tuples = [(0.49,0.51),(1.9,2.4),(2.4,3),(3,10),(10,50)],atten = [0,0,0.1,0.01,0.01]):
+    trunc = y
+    for tup,att in zip(range_tuples,atten):
+        (low,high) = tup
+        [li, hi] = [np.searchsorted(x,low),np.searchsorted(x,high)]
+        trunc[li:hi] = y[li:hi]*att
+    return trunc
+
+def spectrum(sig, t):
+    fy = rfftfreq(sig.size, d=t[1]-t[0])
+    y = rfft(sig)
+    return fy,y
+
+def inverse_spectrum(fourier,t):
+    iy = irfft(fourier)
+    return iy,t
 
 def raw2OD(raw_data,time_ms):
     '''Convert raw absorption data into optical depth'''
