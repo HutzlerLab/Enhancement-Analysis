@@ -55,7 +55,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,old_version=False):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -78,7 +78,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     param_array = []
     data_array = []
     for num in file_numbers:
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth)
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,old_version=old_version)
         param_array.append(params)
         data_array.append(processed_data)
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
@@ -86,7 +86,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,old_version=False):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -105,7 +105,7 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     Same order as channel_types.
     params: metadata associated with the data file.
     '''
-    raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ)
+    raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,old_version=old_version)
     time_ms = time_array(params)
     processed_traces = []
     for ch,type in enumerate(channel_types):
@@ -332,11 +332,11 @@ def raw2OD(raw_data,time_ms):
         OD = np.log(offset/smoothed_data)
     return OD
 
-def read_raw_file(folder_path,num,file_name,DAQ='PXI',print_bool=False):
+def read_raw_file(folder_path,num,file_name,DAQ='PXI',old_version = False,print_bool=False):
     '''From a single folder location, obtain dataset with raw data and metadata.
     For full info, see documentation of process_single_data_file().
     '''
-    file_path = gen_data_filepath(folder_path,num,file_name)
+    file_path = gen_data_filepath(folder_path,num,file_name,old=old_version)
     if print_bool:
         print(file_path)
     if DAQ == 'PXI':
@@ -357,7 +357,7 @@ def how_big_header(file_path):
             lines.append(f.readline().strip('\n'))
             i+=1
             for line in lines:
-                if 'X_Value' in line:
+                if 'PXI1Slot' in line:
                     found_the_end = True
     return i
 
@@ -429,9 +429,12 @@ def import_metadata_PXI(filepath,header_lines=30):
         		Time_Read+=1
         if 'Delta_X' in text:
             meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
+        if 'delta t' in text:
+            print('found!')
+            meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
         if 'X0' in text:
-            meta['start'] = 0
             meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
+    meta['start'] = 0
     meta['YAGtrig'] = 2
     return meta
 
@@ -679,12 +682,14 @@ def extract_meter(metadata):
     return np.array([meta['frequency_meter'] for meta in metadata])
 
 
-def gen_data_filepath(folder_path, num, name):
+def gen_data_filepath(folder_path, num, name, old=False):
     '''Generate file path for single text file named "name_num.txt", located
     in the folder given by fikder_path. Note folder_path should be an absolute
     path
     '''
-    num_str = format(num,'03d')
+    num_str = format(num,'04d')
+    if old:
+        num_str = format(num,'03d')
     folder_path = pathlib.Path(folder_path)
     file =  name + num_str + '.txt'
     full_path = folder_path / file
