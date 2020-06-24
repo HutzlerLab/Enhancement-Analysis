@@ -55,7 +55,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,old_version=False):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,version=1):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -69,6 +69,8 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     root_folder: parent folder containing data folder
     file_name: name of data file. The format should be "nameXXX.txt", where
     XXX is a number labeling the file
+    version: used to implement backwards compatability. 
+    -1 = before COVID shutdown, 0 = first runs during shutdown, 
 
     Outputs:
     A list of the form [processed_data,param_array]
@@ -78,7 +80,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     param_array = []
     data_array = []
     for num in file_numbers:
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,old_version=old_version)
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,version=version)
         param_array.append(params)
         data_array.append(processed_data)
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
@@ -86,7 +88,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,old_version=False):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,version=1):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -105,7 +107,7 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     Same order as channel_types.
     params: metadata associated with the data file.
     '''
-    raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,old_version=old_version)
+    raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
     time_ms = time_array(params)
     processed_traces = []
     for ch,type in enumerate(channel_types):
@@ -332,23 +334,24 @@ def raw2OD(raw_data,time_ms):
         OD = np.log(offset/smoothed_data)
     return OD
 
-def read_raw_file(folder_path,num,file_name,DAQ='PXI',old_version = False,print_bool=False):
+def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=False):
     '''From a single folder location, obtain dataset with raw data and metadata.
     For full info, see documentation of process_single_data_file().
     '''
-    file_path = gen_data_filepath(folder_path,num,file_name,old=old_version)
+    file_path = gen_data_filepath(folder_path,num,file_name,version=version)
     if print_bool:
         print(file_path)
     if DAQ == 'PXI':
-        header_lines = how_big_header(file_path)
-        meta = import_metadata_PXI(file_path,header_lines=header_lines)
-        raw = import_raw_data_PXI(file_path,header_lines=header_lines)
+        header_lines = how_big_header(file_path,version=version)
+        meta = import_metadata_PXI(file_path,header_lines=header_lines,version=version)
+        raw = import_raw_data_PXI(file_path,header_lines=header_lines,version=version)
+        meta['channels'],meta['nsample'] = raw.shape
     elif DAQ == 'Cleverscope':
         meta = import_metadata_Cleverscope(file_path)
         raw = import_raw_data_Cleverscope(filepath)
     return [raw,meta]
 
-def how_big_header(file_path):
+def how_big_header(file_path,version=1):
     with open(file_path, 'r') as f:
         lines=[]
         i=0
@@ -356,31 +359,35 @@ def how_big_header(file_path):
         while found_the_end == False:
             lines.append(f.readline().strip('\n'))
             i+=1
-            for line in lines:
-                if 'PXI1Slot' in line:
-                    found_the_end = True
+            line=lines[-1]
+            marker = {-1:'X_Value',0:'time\tPXI1Slot' ,1: '***end of header***'}[version]
+            if marker in line:
+                found_the_end = True
+                if marker=='***end of header***':
+                    i+=6
     return i
 
 
 
-def import_raw_data_PXI(filepath,header_lines = 30):
+def import_raw_data_PXI(filepath,header_lines = 13,version=1):
     '''Imports raw traces from data columns in single PXI text file.
     Input is file path.'''
+    idx = {-1:0,0:2,1:2}[version]
     try:
         arr = np.genfromtxt(filepath,delimiter='', skip_header = header_lines)
-        raw_data = [ch for ch in arr.T]
+        raw_data = np.array([ch for ch in arr.T[idx:]])
     except ValueError:
         print('Issues with file located at: ',filepath)
-        raw_data = [np.zeros(10000),np.zeros(10000)]
+        raw_data = np.array([np.zeros(10000),np.zeros(10000)])
     except OSError:
         print('Issues with file located at: ',filepath)
-        raw_data = [np.zeros(10000),np.zeros(10000)]
+        raw_data = np.array([np.zeros(10000),np.zeros(10000)])
     return raw_data
 
 def split_strip(string):
     return string.split(':')[-1].strip(';')
 
-def import_metadata_PXI(filepath,header_lines=30):
+def import_metadata_PXI(filepath,header_lines=13, version=1):
     '''Import metadata parameters from Cleverscope file.
 
     Parameters returned as dict:
@@ -389,53 +396,78 @@ def import_metadata_PXI(filepath,header_lines=30):
     nsample: number of elements in time series
     trigtime: UNIX time of trigger
     '''
-    Time_Read = 0
-    with open(filepath, 'r') as f:
-        lines=[]
-        for i in range(header_lines):
-            lines.append(f.readline().strip('\n'))
-    meta={}
-    for text in lines:
-        if 'cycle number' in text:
-            meta['cycle number'] = int(split_strip(text))
-        if 'iteration' in text:
-            meta['iteration'] = int(split_strip(text))
-        if 'command file' in text:
-            meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
-        if 'comment' in text:
-            meta['comment'] = text.split(':')[1]
-        if 'wavenumber' in text:
-            if '(cm-1)(cavity):' in text:
-                meta['frequency_cavity'] = float(text.split('(cm-1)(cavity):')[-1].strip(';'))
-            elif '(cm-1)(meter):' in text:
-                meta['frequency_meter'] = float(text.split('(cm-1)(meter):')[-1].strip(';'))
-            elif '(cm-1):' in text:
-                meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
-        if 'Cavity offset(MHz)' in text:
-            meta['cavity_offset'] = float(split_strip(text))
-        if 'Channels' in text:
-            meta['channels'] = int(text.strip('\t').split('\t')[-1])
-        if 'Samples' in text:
-            meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
-        if 'Time\t' in text:
-        	if Time_Read == 1:
-        		H_M_S = text.strip('Time\t').split('\t')[0].split(':')
+    if version==-1:
+	    Time_Read = 0
+	    with open(filepath, 'r') as f:
+	        lines=[]
+	        for i in range(header_lines):
+	            lines.append(f.readline().strip('\n'))
+	    meta={}
+	    for text in lines:
+	        if 'cycle number' in text:
+	            meta['cycle number'] = int(split_strip(text))
+	        if 'iteration' in text:
+	            meta['iteration'] = int(split_strip(text))
+	        if 'command file' in text:
+	            meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
+	        if 'comment' in text:
+	            meta['comment'] = text.split(':')[1]
+	        if 'wavenumber' in text:
+	            if '(cm-1)(cavity):' in text:
+	                meta['frequency_cavity'] = float(text.split('(cm-1)(cavity):')[-1].strip(';'))
+	            elif '(cm-1)(meter):' in text:
+	                meta['frequency_meter'] = float(text.split('(cm-1)(meter):')[-1].strip(';'))
+	            elif '(cm-1):' in text:
+	                meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
+	        if 'Cavity offset(MHz)' in text:
+	            meta['cavity_offset'] = float(split_strip(text))
+	        if 'Channels' in text:
+	            meta['channels'] = int(text.strip('\t').split('\t')[-1])
+	        if 'Samples' in text:
+	            meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
+	        if 'Time\t' in text:
+	        	if Time_Read == 1:
+	        		H_M_S = text.strip('Time\t').split('\t')[0].split(':')
+	        		hours_in_sec = float(H_M_S[0])*60*60
+	        		min_in_sec = float(H_M_S[1])*60
+	        		sec = float(H_M_S[2])
+	        		meta['trigtime'] = hours_in_sec+min_in_sec+sec
+	        		Time_Read+=1
+	        	else:
+	        		Time_Read+=1
+	        if 'Delta_X' in text:
+	            meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
+	        if 'X0' in text:
+	            meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
+	    meta['start'] = 0
+	    meta['YAGtrig'] = 2
+    if version==0:
+	    with open(filepath, 'r') as f:
+	        lines=[]
+	        for i in range(header_lines):
+	            lines.append(f.readline().strip('\n'))
+	    meta={}
+	    for text in lines:
+	        if 'run number' in text:
+	            meta['run'] = int(split_strip(text))
+	        if 'command file' in text:
+	            meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
+	        if 'comment' in text:
+	            meta['comment'] = text.split(':')[1]
+	        if 'wavemeter' in text:
+	            meta['frequency'] = float(split_strip(text))
+	        if 'offset' in text:
+	            meta['cavity_offset'] = float(split_strip(text))
+	        if 't0' in text:
+        		H_M_S = text.strip('t0\t').split('\t')[0].split(' ')[-1].split(':')
         		hours_in_sec = float(H_M_S[0])*60*60
         		min_in_sec = float(H_M_S[1])*60
         		sec = float(H_M_S[2])
         		meta['trigtime'] = hours_in_sec+min_in_sec+sec
-        		Time_Read+=1
-        	else:
-        		Time_Read+=1
-        if 'Delta_X' in text:
-            meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
-        if 'delta t' in text:
-            print('found!')
-            meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
-        if 'X0' in text:
-            meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
-    meta['start'] = 0
-    meta['YAGtrig'] = 2
+	        if 'delta t' in text:
+	            meta['dt'] = [float(x) for x in text.strip('delta t\t').split('\t')][0]*1000 #convert seconds to ms
+	    meta['start'] = 0
+	    meta['YAGtrig'] = 2 #hard coded for now
     return meta
 
 
@@ -682,18 +714,18 @@ def extract_meter(metadata):
     return np.array([meta['frequency_meter'] for meta in metadata])
 
 
-def gen_data_filepath(folder_path, num, name, old=False):
+def gen_data_filepath(folder_path, num, name, version=1):
     '''Generate file path for single text file named "name_num.txt", located
     in the folder given by fikder_path. Note folder_path should be an absolute
     path
     '''
-    num_str = format(num,'04d')
-    if old:
-        num_str = format(num,'03d')
+    fmt = {-1: '03d', 0:'04d', 1:'01d'}[version]
+    num_str = format(num,fmt)
     folder_path = pathlib.Path(folder_path)
     file =  name + num_str + '.txt'
     full_path = folder_path / file
     return full_path
+
 
 
 # Old Functions #
