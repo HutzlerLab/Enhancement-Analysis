@@ -11,6 +11,8 @@ Eventually, the goal is to make this code object oriented.
 
 Written by Arian Jadbabaie
 Email: arianjad@gmail.com
+
+test
 '''
 
 import pathlib
@@ -21,8 +23,6 @@ from scipy.signal import savgol_filter
 from scipy.optimize import curve_fit
 from scipy.interpolate import splrep, splev
 from scipy.fftpack import rfftfreq, rfft,irfft
-from scipy.signal import butter, sosfiltfilt, sosfreqz
-from scipy.optimize import curve_fit
 
 '''Each data trace has associated with it some metadata, referred to as
 "parameters". These parameters are stored in a dict. The elements are:
@@ -142,7 +142,6 @@ def write_CSV_rows(data_array,file_path,labels):
     labels: list of labels for each data array to be written
     '''
     full_path = pathlib.Path(file_path)
-    full_path = str(full_path)
     data_array = np.array(data_array)
     save_all = []
     save_all.append(labels)
@@ -249,65 +248,43 @@ def raw2fluor(raw_data,time_ms):
     return smoothed_data
 
 def raw2OD_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
-    #Collect useful indices
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.01)
     after_abs_index = np.searchsorted(time_ms,(time_ms[-1]-1))
-
-    #Filter data. Currently just a lowpass butterworth filter
-    if smooth_bool:
-        N = len(time_ms)
-        delta_s = (time_ms[1]-time_ms[0])/1000
-        fs = np.round(1/delta_s,3)
-        lowcut = 900
-        order=2
-        filtered_data = butter_lowpass_filter(raw_data,lowcut,fs,order=order)
-    else:
-        filtered_data = raw_data
-
-    #Remove linear drift and find offset
+    #Calculate linear and DC offset, convert signal to OD
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
-    fit_data = np.concatenate((filtered_data[:beforeYAG_index],filtered_data[after_abs_index:]))
+    fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
     popt, pcov = curve_fit(line_func, fit_time , fit_data,p0=[(fit_data[-1]-fit_data[0])/(time_ms[-1]-time_ms[0]),fit_data.mean()])
     slope=popt[0]
     intercept=popt[1]
-    flat_data = filtered_data-line_func(time_ms,slope,intercept)+intercept
-    #offset = line_func(time_ms[trigger_index],slope,intercept)
-    offset = flat_data[:trigger_index].mean()
+    # offset1 = raw_data[trigger_index-20:trigger_index+30].mean()
+    flat_data = raw_data-line_func(time_ms,slope,intercept)+intercept
+    offset = line_func(time_ms[trigger_index],slope,intercept)
+    #Smooth the data
+    if smooth_bool:
+        zero_offset_data = flat_data-offset
+        #smoothed_data = smooth(flat_data,window=60)
+        smoothed_data = filt(zero_offset_data,time_ms,plot=plot)
+        # floor = smoothed_data[smoothed_data>0].min()
+        # smoothed_data[smoothed_data<0] = floor
+        # smoothed_plot = smooth(raw_data,window=60)
+        # floor = smoothed_plot[smoothed_plot>0].min()
+        # smoothed_plot[smoothed_plot<0] = floor
+        final_data = smoothed_data+offset
+    else:
+        final_data = flat_data
 
-    OD = np.log(offset/flat_data)
+    OD = np.log(offset/final_data)
+    # if OD[trigger_index]<0:
+    #     offset = final_data[trigger_index-50:trigger_index+5].mean()
+    #     OD = np.log(offset/final_data)
     if plot:
         plt.figure(1)
-        plt.plot(time_ms,raw_data)
-        plt.plot(time_ms,filtered_data)
+        plt.plot(time_ms,final_data)
         plt.figure(2)
-        plt.plot(time_ms,flat_data)
-        plt.figure(3)
         plt.plot(time_ms,OD)
+    #Calculate OD, fix floating point errors
     return OD
-
-def butter_lowpass(lowcut, fs, order=5):
-    nyq = 0.5 * fs
-    low = lowcut / nyq
-    sos = butter(order, low, analog=False, btype='lowpass', output='sos')
-    return sos
-
-def butter_lowpass_filter(data, lowcut, fs, order=5):
-    sos = butter_lowpass(lowcut, fs, order=order)
-    y = sosfiltfilt(sos, data)
-    return y
-
-def butter_bandstop(lowstop,highstop,fs,order=5):
-    nyq = 0.5 * fs
-    low = lowstop / nyq
-    high = highstop / nyq
-    sos = butter(order, [low,high], analog=False, btype='bandstop', output='sos')
-    return sos
-
-def butter_bandstop_filter(data, lowstop, highstop, fs, order=5):
-    sos = butter_bandstop(lowstop,highstop,fs,order=order)
-    y = sosfiltfilt(sos,data)
-    return y
 
 def filt(x,t,plot=False):
     fy,y= spectrum(x, t)
@@ -364,7 +341,6 @@ def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=Fal
     For full info, see documentation of process_single_data_file().
     '''
     file_path = gen_data_filepath(folder_path,num,file_name,version=version)
-    file_path=str(file_path)
     if print_bool:
         print(file_path)
     if DAQ == 'PXI':
@@ -386,7 +362,7 @@ def how_big_header(file_path,version=1):
             lines.append(f.readline().strip('\n'))
             i+=1
             line=lines[-1]
-            marker = {-1:'X_Value',0:'time\tPXI1Slot' ,1: '***end of header***',2:'***end of header***'}[version]
+            marker = {-1:'X_Value',0:'time\tPXI1Slot' ,1: '***end of header***'}[version]
             if marker in line:
                 found_the_end = True
                 if marker=='***end of header***':
@@ -398,7 +374,7 @@ def how_big_header(file_path,version=1):
 def import_raw_data_PXI(filepath,header_lines = 13,version=1):
     '''Imports raw traces from data columns in single PXI text file.
     Input is file path.'''
-    idx = {-1:0,0:2,1:2,2:1}[version]
+    idx = {-1:0,0:2,1:2}[version]
     try:
         arr = np.genfromtxt(filepath,delimiter='', skip_header = header_lines)
         raw_data = np.array([ch for ch in arr.T[idx:]])
@@ -467,7 +443,7 @@ def import_metadata_PXI(filepath,header_lines=13, version=1):
 	            meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
 	    meta['start'] = 0
 	    meta['YAGtrig'] = 2
-    if version==0 or version==1 or version==2:
+    if version==0:
 	    with open(filepath, 'r') as f:
 	        lines=[]
 	        for i in range(header_lines):
@@ -723,16 +699,15 @@ def gen_filepath_from_parent(path):
 
 
 def find_last_file(folder_path,file_name,initial=1):
-    found = False
-    n = 0
-    while not found:
-        try:
-            file= open(gen_data_filepath(folder_path,n+initial,file_name))
-            file.close()
-            n+=1
-        except FileNotFoundError:
-            break
-    return n
+    return recursive_last_file(folder_path,initial,file_name)
+
+def recursive_last_file(folder_path,num,file_name):
+    try:
+        file= open(gen_data_filepath(folder_path,num,file_name))
+        file.close()
+        return recursive_last_file(folder_path,num+1,file_name)
+    except FileNotFoundError:
+        return num-1
 
 def extract_cavity(metadata):
     return np.array([meta['frequency_cavity'] for meta in metadata])
@@ -746,7 +721,7 @@ def gen_data_filepath(folder_path, num, name, version=1):
     in the folder given by fikder_path. Note folder_path should be an absolute
     path
     '''
-    fmt = {-1: '03d', 0:'04d', 1:'01d',2:'01d'}[version]
+    fmt = {-1: '03d', 0:'04d', 1:'01d'}[version]
     num_str = format(num,fmt)
     folder_path = pathlib.Path(folder_path)
     file =  name + num_str + '.txt'
