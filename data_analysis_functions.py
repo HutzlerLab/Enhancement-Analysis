@@ -11,6 +11,8 @@ Eventually, the goal is to make this code object oriented.
 
 Written by Arian Jadbabaie
 Email: arianjad@gmail.com
+
+test
 '''
 
 import pathlib
@@ -69,8 +71,8 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     root_folder: parent folder containing data folder
     file_name: name of data file. The format should be "nameXXX.txt", where
     XXX is a number labeling the file
-    version: used to implement backwards compatability. 
-    -1 = before COVID shutdown, 0 = first runs during shutdown, 
+    version: used to implement backwards compatability.
+    -1 = before COVID shutdown, 0 = first runs during shutdown,
 
     Outputs:
     A list of the form [processed_data,param_array]
