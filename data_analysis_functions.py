@@ -423,77 +423,77 @@ def import_metadata_PXI(filepath,header_lines=13, version=1):
     trigtime: UNIX time of trigger
     '''
     if version==-1:
-	    Time_Read = 0
-	    with open(filepath, 'r') as f:
-	        lines=[]
-	        for i in range(header_lines):
-	            lines.append(f.readline().strip('\n'))
-	    meta={}
-	    for text in lines:
-	        if 'cycle number' in text:
-	            meta['cycle number'] = int(split_strip(text))
-	        if 'iteration' in text:
-	            meta['iteration'] = int(split_strip(text))
-	        if 'command file' in text:
-	            meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
-	        if 'comment' in text:
-	            meta['comment'] = text.split(':')[1]
-	        if 'wavenumber' in text:
-	            if '(cm-1)(cavity):' in text:
-	                meta['frequency_cavity'] = float(text.split('(cm-1)(cavity):')[-1].strip(';'))
-	            elif '(cm-1)(meter):' in text:
-	                meta['frequency_meter'] = float(text.split('(cm-1)(meter):')[-1].strip(';'))
-	            elif '(cm-1):' in text:
-	                meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
-	        if 'Cavity offset(MHz)' in text:
-	            meta['cavity_offset'] = float(split_strip(text))
-	        if 'Channels' in text:
-	            meta['channels'] = int(text.strip('\t').split('\t')[-1])
-	        if 'Samples' in text:
-	            meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
-	        if 'Time\t' in text:
-	        	if Time_Read == 1:
-	        		H_M_S = text.strip('Time\t').split('\t')[0].split(':')
-	        		hours_in_sec = float(H_M_S[0])*60*60
-	        		min_in_sec = float(H_M_S[1])*60
-	        		sec = float(H_M_S[2])
-	        		meta['trigtime'] = hours_in_sec+min_in_sec+sec
-	        		Time_Read+=1
-	        	else:
-	        		Time_Read+=1
-	        if 'Delta_X' in text:
-	            meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
-	        if 'X0' in text:
-	            meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
-	    meta['start'] = 0
-	    meta['YAGtrig'] = 2
+        Time_Read = 0
+        with open(filepath, 'r') as f:
+            lines=[]
+            for i in range(header_lines):
+                lines.append(f.readline().strip('\n'))
+        meta={}
+        for text in lines:
+            if 'cycle number' in text:
+                meta['cycle number'] = int(split_strip(text))
+            if 'iteration' in text:
+                meta['iteration'] = int(split_strip(text))
+            if 'command file' in text:
+                meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
+            if 'comment' in text:
+                meta['comment'] = text.split(':')[1]
+            if 'wavenumber' in text:
+                if '(cm-1)(cavity):' in text:
+                    meta['frequency_cavity'] = float(text.split('(cm-1)(cavity):')[-1].strip(';'))
+                elif '(cm-1)(meter):' in text:
+                    meta['frequency_meter'] = float(text.split('(cm-1)(meter):')[-1].strip(';'))
+                elif '(cm-1):' in text:
+                    meta['frequency'] = float(text.split('(cm-1)')[-1].strip(';'))
+            if 'Cavity offset(MHz)' in text:
+                meta['cavity_offset'] = float(split_strip(text))
+            if 'Channels' in text:
+                meta['channels'] = int(text.strip('\t').split('\t')[-1])
+            if 'Samples' in text:
+                meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
+            if 'Time\t' in text:
+            	if Time_Read == 1:
+            		H_M_S = text.strip('Time\t').split('\t')[0].split(':')
+            		hours_in_sec = float(H_M_S[0])*60*60
+            		min_in_sec = float(H_M_S[1])*60
+            		sec = float(H_M_S[2])
+            		meta['trigtime'] = hours_in_sec+min_in_sec+sec
+            		Time_Read+=1
+            	else:
+            		Time_Read+=1
+            if 'Delta_X' in text:
+                meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
+            if 'X0' in text:
+                meta['X0'] = [float(x) for x in text.strip('X0').strip('\t').split('\t')]
+        meta['start'] = 0
+        meta['YAGtrig'] = 2
     if version==0 or version==1 or version==2:
-	    with open(filepath, 'r') as f:
-	        lines=[]
-	        for i in range(header_lines):
-	            lines.append(f.readline().strip('\n'))
-	    meta={}
-	    for text in lines:
-	        if 'run number' in text:
-	            meta['run'] = int(split_strip(text))
-	        if 'command file' in text:
-	            meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
-	        if 'comment' in text:
-	            meta['comment'] = text.split(':')[1]
-	        if 'wavemeter' in text:
-	            meta['frequency'] = float(split_strip(text))
-	        if 'offset' in text:
-	            meta['cavity_offset'] = float(split_strip(text))
-	        if 't0' in text:
-        		H_M_S = text.strip('t0\t').split('\t')[0].split(' ')[-1].split(':')
-        		hours_in_sec = float(H_M_S[0])*60*60
-        		min_in_sec = float(H_M_S[1])*60
-        		sec = float(H_M_S[2])
-        		meta['trigtime'] = hours_in_sec+min_in_sec+sec
-	        if 'delta t' in text:
-	            meta['dt'] = [float(x) for x in text.strip('delta t\t').split('\t')][0]*1000 #convert seconds to ms
-	    meta['start'] = 0
-	    meta['YAGtrig'] = 2 #hard coded for now
+        with open(filepath, 'r') as f:
+            lines=[]
+            for i in range(header_lines):
+                lines.append(f.readline().strip('\n'))
+        meta={}
+        for text in lines:
+            if 'run number' in text:
+                meta['run'] = int(split_strip(text))
+            if 'command file' in text:
+                meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
+            if 'comment' in text:
+                meta['comment'] = text.split(':')[1]
+            if 'wavemeter' in text:
+                meta['frequency'] = float(split_strip(text))
+            if 'offset' in text:
+                meta['cavity_offset'] = float(split_strip(text))
+            if 't0' in text:
+                H_M_S = text.strip('t0').strip().split('\t')[0].split(' ')[-1].split(':')
+                hours_in_sec = float(H_M_S[0])*60*60
+                min_in_sec = float(H_M_S[1])*60
+                sec = float(H_M_S[2])
+                meta['trigtime'] = hours_in_sec+min_in_sec+sec
+            if 'delta t' in text:
+                meta['dt'] = [float(x) for x in text.strip('delta t\t').split('\t')][0]*1000 #convert seconds to ms
+        meta['start'] = 0
+        meta['YAGtrig'] = 2 #hard coded for now
     return meta
 
 
