@@ -117,7 +117,7 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
             abs_trace = process_raw_abs(raw_traces[ch], time_ms,plot=plot,smooth=smooth)
             processed_traces.append(abs_trace)
         elif type == 'fluor':
-            fluor_trace = process_raw_fluor(raw_traces[ch],time_ms)
+            fluor_trace = process_raw_fluor(raw_traces[ch],time_ms,plot=plot,smooth=smooth)
             processed_traces.append(fluor_trace)
     return [processed_traces, params]
 
@@ -198,9 +198,9 @@ def read_CSV_columns(file_path,read_header=0,obj=False):
 
 ##################### Data Processing Subfunctions ############################
 
-def process_raw_fluor(raw_data,time_ms,line_background=True):
+def process_raw_fluor(raw_data,time_ms,line_background=True,plot=False,smooth=False):
     if line_background:
-        processed_trace = raw2fluor_wLine(raw_data,time_ms)
+        processed_trace = raw2fluor_wLine(raw_data,time_ms,plot,smooth)
     else:
         processed_trace = raw2fluor(raw_data,time_ms)
     return processed_trace
@@ -212,30 +212,44 @@ def process_raw_abs(raw_data,time_ms,line_background=True,plot=False,smooth=Fals
         processed_trace = raw2OD(raw_data,time_ms)
     return processed_trace
 
-def raw2fluor_wLine(raw_data,time_ms):
+def raw2fluor_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
+    #Collect useful indices
     trigger_index = np.searchsorted(time_ms,0)
-    beforeYAG_index = np.searchsorted(time_ms,-0.1)
+    beforeYAG_index = np.searchsorted(time_ms,-0.01)
     after_abs_index = np.searchsorted(time_ms,(time_ms[-1]-1))
-    #Calculate linear and DC offset, convert signal to OD
+
+    #Filter data. Currently just a lowpass butterworth filter
+    if smooth_bool:
+        N = len(time_ms)
+        delta_s = (time_ms[1]-time_ms[0])/1000
+        fs = np.round(1/delta_s,3)
+        lowcut = 10000
+        order=2
+        filtered_data = butter_lowpass_filter(raw_data,lowcut,fs,order=order)
+    else:
+        filtered_data = raw_data
+
+    #Remove linear drift and find offset
     fit_time = np.concatenate((time_ms[:beforeYAG_index],time_ms[after_abs_index:]))
-    fit_data = np.concatenate((raw_data[:beforeYAG_index],raw_data[after_abs_index:]))
+    fit_data = np.concatenate((filtered_data[:beforeYAG_index],filtered_data[after_abs_index:]))
     popt, pcov = curve_fit(line_func, fit_time , fit_data,p0=[(fit_data[-1]-fit_data[0])/(time_ms[-1]-time_ms[0]),fit_data.mean()])
     slope=popt[0]
     intercept=popt[1]
-    offset = line_func(time_ms[trigger_index],slope,intercept)
-    flat_data=np.zeros(len(raw_data))
-    for i in range(len(raw_data)):
-        flat_data[i]=raw_data[i]-(line_func(time_ms[i],A,offset)-offset)
-    #offset = raw_data[:beforeYAG_index].mean()
-    #Smooth the data
-    smoothed_data = smooth(flat_data,window=60)
-    floor = smoothed_data[smoothed_data>0].min()
-    smoothed_data[smoothed_data<0] = floor
+    flat_data = filtered_data-line_func(time_ms,slope,intercept)+intercept
+    #offset = line_func(time_ms[trigger_index],slope,intercept)
+    offset = flat_data[:trigger_index].mean()
 
-    offset = (raw_data[:beforeYAG_index].mean()+raw_data[-1000].mean())/2
-    #Smooth the data
-    smoothed_data-=offset
-    return smoothed_data
+    final_data = flat_data - offset
+    if plot:
+        plt.figure(1)
+        plt.plot(time_ms,raw_data)
+        plt.plot(time_ms,filtered_data)
+        plt.figure(2)
+        plt.plot(time_ms,flat_data)
+        plt.figure(3)
+        plt.plot(time_ms,final_data)
+    return final_data
+
 
 def raw2fluor(raw_data,time_ms):
     trigger_index = np.searchsorted(time_ms,0)
