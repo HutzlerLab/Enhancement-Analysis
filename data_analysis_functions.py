@@ -36,10 +36,9 @@ from scipy.optimize import curve_fit
 ##Main Functions##
 
 def integrate_data_array(data_array,metadata_array,bounds,display=True,fig_num=1):
-    integrated_array = []
-    for data, meta in zip(data_array, metadata_array):
-        integrated_array.append(slice_integrate(data,meta,bounds,display,fig_num))
-    integrated_array = np.array(integrated_array)
+    integrated_array = np.zeros(len(data_array))
+    for i,(data, meta) in enumerate(zip(data_array, metadata_array)):
+        integrated_array[i] = slice_integrate(data,meta,bounds,display,fig_num)
     return integrated_array
 
 def extract_frequency(metadata):
@@ -57,7 +56,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,version=1):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=900,fluor_filter=1000,version=1):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -79,18 +78,18 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     Each element in data_array and parameter_array correspond to the traces and
     metadata obtained from a single file.
     '''
-    param_array = []
-    data_array = []
-    for num in file_numbers:
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,version=version)
-        param_array.append(params)
-        data_array.append(processed_data)
+    param_array = [[] for _ in range(len(file_numbers))]
+    data_array = [[] for _ in range(len(file_numbers))]
+    for i,num in enumerate(file_numbers):
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,version=version)
+        param_array[i] = params
+        data_array[i] = processed_data
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
     # param_array = np.array(param_array)
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,version=1):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,version=1):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -111,14 +110,14 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     '''
     raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
     time_ms = time_array(params)
-    processed_traces = []
+    processed_traces = [[] for _ in range(len(channel_types))]
     for ch,type in enumerate(channel_types):
         if type == 'abs':
-            abs_trace = process_raw_abs(raw_traces[ch], time_ms,plot=plot,smooth=smooth)
-            processed_traces.append(abs_trace)
+            abs_trace = process_raw_abs(raw_traces[ch], time_ms,plot=plot,smooth=smooth,filter=abs_filter)
+            processed_traces[ch] =abs_trace
         elif type == 'fluor':
-            fluor_trace = process_raw_fluor(raw_traces[ch],time_ms,plot=plot,smooth=smooth)
-            processed_traces.append(fluor_trace)
+            fluor_trace = process_raw_fluor(raw_traces[ch],time_ms,plot=plot,smooth=smooth,filter=fluor_filter)
+            processed_traces[ch] = fluor_trace
     return [processed_traces, params]
 
 def time_array(parameters):
@@ -198,21 +197,21 @@ def read_CSV_columns(file_path,read_header=0,obj=False):
 
 ##################### Data Processing Subfunctions ############################
 
-def process_raw_fluor(raw_data,time_ms,line_background=True,plot=False,smooth=False):
+def process_raw_fluor(raw_data,time_ms,line_background=True,plot=False,smooth=False,filter=1000):
     if line_background:
-        processed_trace = raw2fluor_wLine(raw_data,time_ms,plot,smooth)
+        processed_trace = raw2fluor_wLine(raw_data,time_ms,plot,smooth,filter)
     else:
         processed_trace = raw2fluor(raw_data,time_ms)
     return processed_trace
 
-def process_raw_abs(raw_data,time_ms,line_background=True,plot=False,smooth=False):
+def process_raw_abs(raw_data,time_ms,line_background=True,plot=False,smooth=False,filter=1000):
     if line_background:
-        processed_trace = raw2OD_wLine(raw_data,time_ms,plot,smooth)
+        processed_trace = raw2OD_wLine(raw_data,time_ms,plot,smooth,filter)
     else:
         processed_trace = raw2OD(raw_data,time_ms)
     return processed_trace
 
-def raw2fluor_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
+def raw2fluor_wLine(raw_data,time_ms,plot=False,smooth_bool=False,filter=1000):
     #Collect useful indices
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.01)
@@ -223,7 +222,7 @@ def raw2fluor_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
         N = len(time_ms)
         delta_s = (time_ms[1]-time_ms[0])/1000
         fs = np.round(1/delta_s,3)
-        lowcut = 10000
+        lowcut = filter
         order=2
         filtered_data = butter_lowpass_filter(raw_data,lowcut,fs,order=order)
     else:
@@ -262,7 +261,7 @@ def raw2fluor(raw_data,time_ms):
     #Calculate OD, fix floating point errors
     return smoothed_data
 
-def raw2OD_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
+def raw2OD_wLine(raw_data,time_ms,plot=False,smooth_bool=False,filter=900):
     #Collect useful indices
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.01)
@@ -273,7 +272,7 @@ def raw2OD_wLine(raw_data,time_ms,plot=False,smooth_bool=False):
         N = len(time_ms)
         delta_s = (time_ms[1]-time_ms[0])/1000
         fs = np.round(1/delta_s,3)
-        lowcut = 900
+        lowcut = filter
         order=2
         filtered_data = butter_lowpass_filter(raw_data,lowcut,fs,order=order)
     else:
@@ -494,7 +493,7 @@ def import_metadata_PXI(filepath,header_lines=13, version=1):
                 meta['command file'] = split_strip(text).split('\\')[-1].strip('.txt')
             if 'comment' in text:
                 meta['comment'] = text.split(':')[1]
-            if 'wavemeter' in text:
+            if 'wavemeter(cm-1)' in text:
                 meta['frequency'] = float(split_strip(text))
             if 'offset' in text:
                 meta['cavity_offset'] = float(split_strip(text))
@@ -506,6 +505,8 @@ def import_metadata_PXI(filepath,header_lines=13, version=1):
                 meta['trigtime'] = hours_in_sec+min_in_sec+sec
             if 'delta t' in text:
                 meta['dt'] = [float(x) for x in text.strip('delta t\t').split('\t')][0]*1000 #convert seconds to ms
+            if 'HFwavemeter' in text:
+                meta['frequency_HF']  = float(split_strip(text))
         meta['start'] = 0
         meta['YAGtrig'] = 2 #hard coded for now
     return meta
@@ -851,7 +852,7 @@ def sortData(indep_var,depend_var):
         if not isinstance(indep_var,list):
             indep_var = list(indep_var)
         sorted_DV = [DV for IV,DV in sorted(zip(indep_var,depend_var))]
-    return sorted_DV
+    return np.array(sorted_DV)
 
 def calcEnhancement(blocked_int,unblocked_int):
     num_traces = len(blocked_int)
