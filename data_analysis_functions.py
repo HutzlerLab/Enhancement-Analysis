@@ -56,7 +56,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=900,fluor_filter=1000,version=1):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=900,fluor_filter=1000,avg=0,version=1):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -81,7 +81,13 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     param_array = [[] for _ in range(len(file_numbers))]
     data_array = [[] for _ in range(len(file_numbers))]
     for i,num in enumerate(file_numbers):
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,version=version)
+        if avg == 0:
+            avg_files = 1
+        elif i > len(file_numbers) - avg:
+            avg_files = len(file_numbers)-i
+        else:
+            avg_files=avg
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,version=version)
         param_array[i] = params
         data_array[i] = processed_data
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
@@ -89,7 +95,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,version=1):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,version=1):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -108,7 +114,16 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     Same order as channel_types.
     params: metadata associated with the data file.
     '''
-    raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
+    if avg_files==1:
+        raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
+    else:
+        raw = [[] for _ in range(avg_files)]
+        params = [[] for _ in range(avg_files)]
+        for i in range(avg_files):
+            raw[i], params[i] = read_raw_file(folder_path,file_num+i,file_name,DAQ=DAQ,version=version)
+        raw_avg = np.mean(raw,axis=0)
+        params_avg = params[int(avg_files/2)]
+        raw_traces, params = [raw_avg,params_avg]
     time_ms = time_array(params)
     processed_traces = [[] for _ in range(len(channel_types))]
     for ch,type in enumerate(channel_types):
