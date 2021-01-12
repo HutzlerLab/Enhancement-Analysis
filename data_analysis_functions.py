@@ -95,7 +95,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,version=1):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,version=2):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -117,10 +117,25 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     if avg_files==1:
         raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
     else:
-        raw = [[] for _ in range(avg_files)]
-        params = [[] for _ in range(avg_files)]
-        for i in range(avg_files):
-            raw[i], params[i] = read_raw_file(folder_path,file_num+i,file_name,DAQ=DAQ,version=version)
+        raw = np.array([[] for _ in range(avg_files)])
+        params = np.array([[] for _ in range(avg_files)])
+        avg_index = 1
+        file_index = 1
+        timeout_index = 0
+        raw[0],params[0] = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
+        wave = params['command file']
+        while avg_index < avg_files:
+        	_raw,_params = read_raw_file(folder_path,file_num+file_index,file_name,DAQ=DAQ,version=version)
+        	## TO DO: read_raw_file returns error if file number does not exist
+        	file_index+=1
+        	if _params['command file'] == wave:
+        		avg_index+=1
+        		timeout_index = 0
+        		raw[num],params[num] = _raw,_params
+        	else:
+        		timeout_index+=1
+        		if timeout_index>3:
+        			break
         raw_avg = np.mean(raw,axis=0)
         params_avg = params[int(avg_files/2)]
         raw_traces, params = [raw_avg,params_avg]
@@ -405,7 +420,7 @@ def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=Fal
         raw = import_raw_data_Cleverscope(filepath)
     return [raw,meta]
 
-def how_big_header(file_path,version=1):
+def how_big_header(file_path,version=1,lim=1000):
     with open(file_path, 'r') as f:
         lines=[]
         i=0
@@ -419,6 +434,9 @@ def how_big_header(file_path,version=1):
                 found_the_end = True
                 if marker=='***end of header***':
                     i+=6
+            elif i>lim:
+            	print('Did not find end of header for',file_path)
+            	break
     return i
 
 
