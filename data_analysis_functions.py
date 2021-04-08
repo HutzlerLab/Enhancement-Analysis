@@ -80,6 +80,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     '''
     param_array = [[] for _ in range(len(file_numbers))]
     data_array = [[] for _ in range(len(file_numbers))]
+    last = file_numbers[-1]
     for i,num in enumerate(file_numbers):
         if avg == 0:
             avg_files = 1
@@ -87,7 +88,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
             avg_files = len(file_numbers)-i
         else:
             avg_files=avg
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,version=version)
+        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version)
         param_array[i] = params
         data_array[i] = processed_data
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
@@ -95,7 +96,7 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,version=2):
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,last=None,version=2):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -117,27 +118,32 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     if avg_files==1:
         raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
     else:
-        raw = np.array([[] for _ in range(avg_files)])
-        params = np.array([[] for _ in range(avg_files)])
+        raw = [[] for _ in range(avg_files)]
+        params = [[] for _ in range(avg_files)]
         avg_index = 1
         file_index = 1
         timeout_index = 0
         raw[0],params[0] = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
-        wave = params['command file']
+        wave = params[0]['command file']
         while avg_index < avg_files:
-        	_raw,_params = read_raw_file(folder_path,file_num+file_index,file_name,DAQ=DAQ,version=version)
-        	## TO DO: read_raw_file returns error if file number does not exist
-        	file_index+=1
-        	if _params['command file'] == wave:
-        		avg_index+=1
-        		timeout_index = 0
-        		raw[num],params[num] = _raw,_params
+        	if file_index+file_num > last:
+        		raw = raw[:avg_index]
+        		params = params[:avg_index]
+        		break
         	else:
-        		timeout_index+=1
-        		if timeout_index>3:
-        			break
+	        	_raw,_params = read_raw_file(folder_path,file_num+file_index,file_name,DAQ=DAQ,version=version)
+	        	## TO DO: read_raw_file returns error if file number does not exist
+	        	file_index+=1
+	        	if _params['command file'] == wave:
+	        		timeout_index = 0
+	        		raw[avg_index],params[avg_index] = _raw,_params
+	        		avg_index+=1
+	        	else:
+	        		timeout_index+=1
+	        		if timeout_index>3:
+	        			break
         raw_avg = np.mean(raw,axis=0)
-        params_avg = params[int(avg_files/2)]
+        params_avg = params[int(len(params)/2)]
         raw_traces, params = [raw_avg,params_avg]
     time_ms = time_array(params)
     processed_traces = [[] for _ in range(len(channel_types))]
@@ -295,7 +301,7 @@ def raw2OD_wLine(raw_data,time_ms,plot=False,smooth_bool=False,filter=900):
     #Collect useful indices
     trigger_index = np.searchsorted(time_ms,0)
     beforeYAG_index = np.searchsorted(time_ms,-0.01)
-    after_abs_index = np.searchsorted(time_ms,(time_ms[-1]-1))
+    after_abs_index = np.searchsorted(time_ms,6)
 
     #Filter data. Currently just a lowpass butterworth filter
     if smooth_bool:
