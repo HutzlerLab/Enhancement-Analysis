@@ -23,6 +23,8 @@ from scipy.interpolate import splrep, splev
 from scipy.fftpack import rfftfreq, rfft,irfft
 from scipy.signal import butter, sosfiltfilt, sosfreqz
 from scipy.optimize import curve_fit
+import multiprocessing as mp
+from functools import partial
 
 '''Each data trace has associated with it some metadata, referred to as
 "parameters". These parameters are stored in a dict. The elements are:
@@ -37,7 +39,7 @@ from scipy.optimize import curve_fit
 
 def integrate_data_array(data_array,metadata_array,bounds,display=True,fig_num=1):
     integrated_array = np.zeros(len(data_array))
-    for i,(data, meta) in enumerate(zip(data_array, metadata_array)):
+    for i,(data,meta) in enumerate(zip(data_array, metadata_array)):
         integrated_array[i] = slice_integrate(data,meta,bounds,display,fig_num)
     return integrated_array
 
@@ -56,7 +58,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=900,fluor_filter=1000,avg=0,version=1):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=1500,fluor_filter=2000,avg=0,version=1):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -78,25 +80,42 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     Each element in data_array and parameter_array correspond to the traces and
     metadata obtained from a single file.
     '''
+
+    pool = mp.Pool(mp.cpu_count())
     param_array = [[] for _ in range(len(file_numbers))]
     data_array = [[] for _ in range(len(file_numbers))]
     last = file_numbers[-1]
-    for i,num in enumerate(file_numbers):
-        if avg == 0:
-            avg_files = 1
-        elif i > len(file_numbers) - avg:
-            avg_files = len(file_numbers)-i
-        else:
-            avg_files=avg
-        processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version)
-        param_array[i] = params
-        data_array[i] = processed_data
+    worker = partial(mp_process_single_data_file,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,last = last,version=version)
+    results = pool.starmap(worker, [(i,file_numbers,avg,folder_path, num, file_name, channel_types) for i,num in enumerate(file_numbers)])
+    data_array,param_array = np.array(results).T
+    pool.close()
+    # for i,num in enumerate(file_numbers):
+    #     if avg == 0:
+    #         avg_files = 1
+    #     elif i > len(file_numbers) - avg:
+    #         avg_files = len(file_numbers)-i
+    #     else:
+    #         avg_files=avg
+    #     processed_data, params = process_single_data_file(folder_path, num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version)
+    #     param_array[i] = params
+    #     data_array[i] = processed_data
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
     # param_array = np.array(param_array)
     return [data_array,param_array]
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,last=None,version=2):
+def mp_process_single_data_file(i,file_numbers,avg,folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,n_cmd = 2,last=None,version=2):
+    if avg == 0:
+        avg_files = 1
+    elif i > len(file_numbers) - avg:
+        avg_files = len(file_numbers)-i
+    else:
+        avg_files=avg
+    processed_data, params = process_single_data_file(folder_path, file_num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version)
+    return np.array([processed_data,params])
+
+
+def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,n_cmd = 2,last=None,version=2):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
