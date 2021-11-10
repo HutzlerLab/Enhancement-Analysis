@@ -18,7 +18,6 @@ import numpy as np
 import csv
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
-from scipy.optimize import curve_fit
 from scipy.interpolate import splrep, splev
 from scipy.fftpack import rfftfreq, rfft,irfft
 from scipy.signal import butter, sosfiltfilt, sosfreqz
@@ -26,6 +25,7 @@ from scipy.optimize import curve_fit
 import multiprocessing as mp
 from functools import partial
 import sys
+from copy import deepcopy
 
 '''Each data trace has associated with it some metadata, referred to as
 "parameters". These parameters are stored in a dict. The elements are:
@@ -38,11 +38,26 @@ import sys
 
 ##Main Functions##
 
-def integrate_data_array(data_array,metadata_array,bounds,display=True,fig_num=1):
-    integrated_array = np.zeros(len(data_array))
-    for i,(data,meta) in enumerate(zip(data_array, metadata_array)):
-        integrated_array[i] = slice_integrate(data,meta,bounds,display,fig_num)
-    return integrated_array
+def integrate_data_array(data_array,metadata_array,bounds_array,plot=False):
+    pool = mp.Pool(mp.cpu_count())
+    results = pool.starmap(mp_integrate, [(data,meta,bounds_array) for data,meta in zip(data_array,metadata_array)])
+    pool.close()
+    pool.join()
+    integrated_data_array = np.array(results)
+    if plot:
+        plot_slices(data_array,metadata_array,bounds_array)
+    return integrated_data_array.T #sort by channel instead of by run
+
+def mp_integrate(data,meta,bounds_array):
+    time_ms = time_array(meta)
+    dt = meta['dt']
+    integrated_data = np.zeros(data.shape[0])
+    for i,(channel, bounds) in enumerate(zip(data,bounds_array)):
+        start_i = np.searchsorted(time_ms,bounds[0])
+        stop_i = np.searchsorted(time_ms,bounds[1])
+        integrated_data[i] = np.round(channel[start_i:stop_i].sum()*dt,decimals=6)
+    return integrated_data
+
 
 def extract_frequency(metadata):
     return np.array([meta['frequency'] for meta in metadata])
@@ -59,7 +74,24 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=1500,fluor_filter=2000,avg=0,version=1):
+def plot_slices(data_array,meta_data_array,bounds_array):
+    time_ms = time_array(meta_data_array[0])
+    for i in range(data_array.shape[1]):
+        start_i = np.searchsorted(time_ms,bounds_array[i][0])
+        stop_i = np.searchsorted(time_ms,bounds_array[i][1])
+        t = slice(start_i,stop_i)
+        plt.figure(i)
+        plt.title('Channel {}'.format(i+1))
+        plt.xlabel('Time After Ablation (ms)')
+        plt.ylabel('Signal')
+        for j in range(data_array.shape[0]):
+            plt.plot(time_ms[t],data_array[j,i,t])
+    return
+
+
+
+
+def read_raw_data_array(file_numbers,file_name,folder_path,DAQ='PXI',version=4,map_version='starmap',chunksize=1):#channel_types,smooth=False,abs_filter=1500,fluor_filter=2000,avg=0,version=1,avg_cycle=False):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -81,16 +113,17 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     Each element in data_array and parameter_array correspond to the traces and
     metadata obtained from a single file.
     '''
-
     pool = mp.Pool(mp.cpu_count())
-    param_array = [[] for _ in range(len(file_numbers))]
-    data_array = [[] for _ in range(len(file_numbers))]
-    last = file_numbers[-1]
-    worker = partial(mp_process_single_data_file,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,last = last,version=version)
-    results = pool.starmap(worker, [(i,file_numbers,avg,folder_path, num, file_name, channel_types) for i,num in enumerate(file_numbers)])
-    data_array,param_array = np.array(results).T
+    worker = partial(read_raw_file,file_name=file_name,folder_path = folder_path,DAQ=DAQ,version=version)
+    if map_version=='starmap':
+    	results = pool.starmap(worker,[(num,) for num in file_numbers],chunksize=chunksize)
+    elif map_version=='imap':
+    	results = pool.imap(worker, file_numbers,chunksize=chunksize)
+    elif map_version == 'map':
+    	results = pool.map(worker, file_numbers,chunksize=chunksize)
     pool.close()
     pool.join()
+    raw_data_array,param_array = list(zip(*results))
     # for i,num in enumerate(file_numbers):
     #     if avg == 0:
     #         avg_files = 1
@@ -103,21 +136,89 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     #     data_array[i] = processed_data
     # data_array = np.array(data_array) # decided not to turn these into numpy arrays
     # param_array = np.array(param_array)
-    return [data_array,param_array]
+    return [np.array(raw_data_array),param_array]
+
+def correct_freq(param_array,laser=None):
+    all_freq = np.array([np.array(meta['wavemeter readings']) for meta in param_array]).T
+    for laser_index in range(len(all_freq)):
+        if laser==None:
+            pass
+        elif laser != laser_index+1:
+            continue
+        frequency = all_freq[laser_index]
+        exposure = False
+        for i in range(len(frequency)):
+            if frequency[i]<0:
+                if not exposure:
+                    print('Wavemeter Exposure Issue')
+                    exposure=True
+                else:
+                    pass
+                j = i
+                k = i
+                while (j>0 and k<(len(frequency)-1)) and (frequency[j-1]<0 or frequency[k+1]<0):
+                    if frequency[j-1]<0:
+                        j-=1
+                    if frequency[k+1]<0:
+                       k+=1
+                if j<= 0 or k>=(len(frequency)-1):
+                    print('Wavemeter issue at endpoints')
+                else:
+                    frequency[i]=(frequency[k+1]-frequency[j-1])/((k+1)-(j-1))*(i-(j-1))+frequency[j-1]
+        # freq = frequency[frequency>0]
+        # slope = (freq[-1] - freq[0])/len(freq)
+        # for i in range(len(frequency)):
+        #     if i==0 and frequency[i]<0:
+        #         j = 1
+        #         while frequency[j]<0:
+        #             j+=1
+        #         for k in range(j):
+        #             frequency[j-k-1] = frequency[j-k]-slope
+        #     elif frequency[i]<0:
+        #         frequency[i] = frequency[i-1]+slope
+        all_freq[laser_index] = frequency
+    for i in range(len(param_array)):
+        param_array[i]['wavemeter readings'] = all_freq.T[i]
+    return param_array
+
+# def handle_averaging(file_numbers,avg,folder_path,num,file_name,avg_cycle):
+#     if (avg == 0 or avg == 1) and avg_cycle == False:
+#         return file_numbers
+#     elif avg>1 and avg_cycle == False:
+#         cmd_files = []
+#         i0 = file_numbers[0]
+#         params_0 = read_raw_file(folder_path,i0,file_name,DAQ=DAQ,version=version,meta_only=True)
+#         #Need to find out how many command files there are. If no averaging we can just step through. If there is averaging we have to be careful with stepping
+#         #total reps tells us how many averages the DAQ took. So if no averaging, total reps = 1, if averaging, total reps > 1
+#         total_reps = params_0['total repetition']
+#         cmd_files.append(params_0['command file'])
+#         repeat_cmd = False
+#         i=total_reps
+#         while repeat_cmd==False:
+#             _params = read_raw_file(folder_path,i0+i,file_name,DAQ=DAQ,version=version,meta_only=True)
+#             if _params['command file'] in cmd_files:
+#                 repeat_cmd = True
+#             else:
+#                 cmd_files.append(_params['command file'])
+#                 i+=total_reps
+#         #Now we find all the data files associated with each cmd file
+#         pool = mp.Pool(mp.cpu_count())
+#         worker = mp_sort_cmd_files(folder_path,num,file_name,cmd_files,DAQ=DAQ, verison=version)
 
 
-def mp_process_single_data_file(i,file_numbers,avg,folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,n_cmd = 2,last=None,version=2):
-    if avg == 0:
-        avg_files = 1
+def mp_process_single_data_file(file_num,file_name,folder_path, DAQ='PXI',version=2):
+    # if avg == 0 and avg_cycle == False:
+    #     avg_files = 1
     # elif i > len(file_numbers) - avg:
     #     avg_files = len(file_numbers)-i
-    else:
-        avg_files=avg
-    processed_data, params = process_single_data_file(folder_path, file_num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version)
-    return np.array([processed_data,params])
+    # elif avg_cycle==False:
+    #     avg_files=avg
+
+    raw_data, params = read_raw_file(file_num,file_name,folder_path,DAQ=DAQ,version=version)
+    return np.array([raw_data,params])
 
 
-def process_single_data_file(folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,avg_files=1,n_cmd = 2,last=None,version=2):
+def process_single_data_file(file_num, file_name, folder_path, DAQ='PXI',version=2):
     '''This function processes a single raw data file. It returns the
     processed data and the parameters associated with that data.
 
@@ -136,47 +237,119 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     Same order as channel_types.
     params: metadata associated with the data file.
     '''
-    if avg_files==1:
-        raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
+    raw_traces, params = read_raw_file(file_num,file_name,folder_path,DAQ=DAQ,version=version)
+
+    # time_ms = time_array(params)
+    # processed_traces = [[] for _ in range(len(channel_types))]
+    # for ch,type in enumerate(channel_types):
+    #     if type == 'abs':
+    #         abs_trace = process_raw_abs(raw_traces[ch], time_ms,plot=plot,smooth=smooth,filter=abs_filter)
+    #         processed_traces[ch] =abs_trace
+    #     elif type == 'fluor':
+    #         fluor_trace = process_raw_fluor(raw_traces[ch],time_ms,plot=plot,smooth=smooth,filter=fluor_filter)
+    #         processed_traces[ch] = fluor_trace
+    return [raw_traces, params]
+
+def sort_by_command(data_array,meta_dicts):
+    waveform_dict = {}
+    for i,meta in enumerate(meta_dicts):
+        try:
+            waveform_dict[meta['command file']][1].append(meta_dicts[i])
+            waveform_dict[meta['command file']][0].append(data_array[i])
+        except KeyError:
+            waveform_dict[meta['command file']] = [[data_array[i]],[meta_dicts[i]]]
+    for key in waveform_dict:
+        waveform_dict[key][0] = np.array(waveform_dict[key][0])
+        print('Found {} shots with command file {}'.format(len(waveform_dict[key][1]),key))
+    return waveform_dict
+
+
+def average_raw_data_array(raw_data,params,num_avg=1,cycle_avg=False):
+    pool = mp.Pool(mp.cpu_count())
+    #Need to handle end points. Easiest thing to do is to chop them off.
+    if cycle_avg:
+        num_avg = params[0]['total cycle']
+        cycle_start = params[0]['cycle number']
+        cycle_end = params[-1]['cycle number']
+        i=0
+        j = len(params)
+        while cycle_start % num_avg != 1:
+            i+=1
+            cycle_start = params[i]['cycle number']
+        while cycle_end % num_avg != 0:
+            j-=1
+            cycle_end = params[j]['cycle number']
     else:
-        raw = [[] for _ in range(avg_files)]
-        params = [[] for _ in range(avg_files)]
-        avg_index = 1
-        file_index = 1
-        timeout_index = 0
-        raw[0],params[0] = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
-        wave = params[0]['command file']
-        cycle = params[0]['cycle number']
-        while avg_index < avg_files:
-        	if file_index+file_num > last:
-        		raw = raw[:avg_index]
-        		params = params[:avg_index]
-        		break
-        	else:
-	        	_raw,_params = read_raw_file(folder_path,file_num+file_index,file_name,DAQ=DAQ,version=version)
-	        	## TO DO: read_raw_file returns error if file number does not exist
-	        	file_index+=1
-	        	if _params['command file'] == wave:
-	        		timeout_index = 0
-	        		raw[avg_index],params[avg_index] = _raw,_params
-	        		avg_index+=1
-	        	else:
-	        		timeout_index+=1
-	        		if timeout_index>3:
-	        			break
-        raw_avg = np.mean(raw,axis=0)
-        params_avg = params[int(len(params)/2)]
-        raw_traces, params = [raw_avg,params_avg]
+        i=0
+        j=len(params)
+        while j+1 % num_avg != 0:
+            j-=1
+    raw_data=raw_data[i:j]
+    params = params[i:j]
+    #
+    #     if params[0]['cycle number'] % total
+    #     while()
+    # for i, meta in enumerate(params):
+    #     if cycle_avg:
+    #         cycle_num = meta['cycle number']
+    #     else:
+    #         cycle_num = i+1
+    #     if cycle_num % num_avg == 0 and len(cycle_indices)>0:
+    #         average_indices.append(cycle_indices)
+    #         cycle_indices = []
+    #     else:
+    #         cycle_indices.append(i)
+    #     if len(cycle_indices)>0:
+    #         avg_indices.append(cycle_indices)
+    #partial(mp_process_single_data_file,DAQ=DAQ,version=version)
+    results = pool.starmap(mp_avg, [(raw_data[run_index:run_index+num_avg], params[run_index:run_index+num_avg]) for run_index in range(0,len(params),num_avg)])
+    pool.close()
+    pool.join()
+    avg_data_array,avg_param_array = list(zip(*results))
+    return [np.array(avg_data_array), avg_param_array]
+
+def process_raw_data_array(data_array,param_array,ch_types=None):
+    pool = mp.Pool(mp.cpu_count())
+    mp_process_raw_partial = partial(mp_process_raw,channel_types=ch_types)
+    results = pool.starmap(mp_process_raw_partial, [(data,params) for data,params in zip(data_array,param_array)])
+    pool.close()
+    pool.join()
+    proc_data_array,param_array = list(zip(*results))
+    return [np.array(proc_data_array),param_array]
+
+def mp_process_raw(data,params,plot=False,smooth=True,channel_types = None,abs_filter = 3000, fluor_filter = 3000):
     time_ms = time_array(params)
-    processed_traces = [[] for _ in range(len(channel_types))]
+    if channel_types == None:
+        channel_types = params['channel types']
+    processed_traces = [[] for ch in channel_types]
     for ch,type in enumerate(channel_types):
         if type == 'abs':
-            abs_trace = process_raw_abs(raw_traces[ch], time_ms,plot=plot,smooth=smooth,filter=abs_filter)
-            processed_traces[ch] =abs_trace
+            abs_trace = process_raw_abs(data[ch], time_ms,plot=plot,smooth=smooth,filter=abs_filter)
+            processed_traces[ch] = np.array(abs_trace)
         elif type == 'fluor':
-            fluor_trace = process_raw_fluor(raw_traces[ch],time_ms,plot=plot,smooth=smooth,filter=fluor_filter)
-            processed_traces[ch] = fluor_trace
-    return [processed_traces, params]
+            fluor_trace = process_raw_fluor(data[ch],time_ms,plot=plot,smooth=smooth,filter=fluor_filter)
+            processed_traces[ch] = np.array(fluor_trace)
+        elif type == 'i2' or type == 'iod':
+            processed_traces[ch] = data[ch]
+    return [np.array(processed_traces),params]
+
+
+
+def mp_avg(data_array, param_array):
+    avg_data = np.zeros((data_array.shape[1:]))
+    avg_data = np.mean(data_array,axis=0)
+
+    avg_param = deepcopy(param_array[0])
+    avg_wavemeter = np.zeros(len(avg_param['wavemeter readings']))
+    avg_time = 0
+    n = len(param_array)
+    for _params in param_array:
+        avg_wavemeter+= np.array(_params['wavemeter readings'])
+        avg_time+=_params['trigtime']
+    avg_param['wavemeter readings'] = avg_wavemeter/n
+    avg_param['trigtime'] = avg_time/n
+    return [avg_data,avg_param]
+
 
 def time_array(parameters):
     '''This function generates a time array using metadata, supplied as the
@@ -268,6 +441,8 @@ def process_raw_abs(raw_data,time_ms,line_background=True,plot=False,smooth=Fals
     else:
         processed_trace = raw2OD(raw_data,time_ms)
     return processed_trace
+
+
 
 def raw2fluor_wLine(raw_data,time_ms,plot=False,smooth_bool=False,filter=1000):
     #Collect useful indices
@@ -430,7 +605,7 @@ def raw2OD(raw_data,time_ms):
         OD = np.log(offset/smoothed_data)
     return OD
 
-def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=False):
+def read_raw_file(num,file_name,folder_path,DAQ='PXI',version = 1,print_bool=False,meta_only=False):
     '''From a single folder location, obtain dataset with raw data and metadata.
     For full info, see documentation of process_single_data_file().
     '''
@@ -441,12 +616,16 @@ def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=Fal
     if DAQ == 'PXI':
         header_lines = how_big_header(file_path,version=version)
         meta = import_metadata_PXI(file_path,header_lines=header_lines,version=version)
-        raw = import_raw_data_PXI(file_path,header_lines=header_lines,version=version)
-        meta['channels'],meta['nsample'] = raw.shape
+        if meta_only:
+            return meta
+        else:
+            raw = import_raw_data_PXI(file_path,header_lines=header_lines,version=version)
+            meta['channels'],meta['nsample'] = raw.shape
+            return [raw,meta]
     elif DAQ == 'Cleverscope':
         meta = import_metadata_Cleverscope(file_path)
         raw = import_raw_data_Cleverscope(filepath)
-    return [raw,meta]
+        return [raw,meta]
 
 def how_big_header(file_path,version=1,lim=1000):
     if version==3:
@@ -465,8 +644,8 @@ def how_big_header(file_path,version=1,lim=1000):
                 if (marker=='***end of header***') or (marker=='***End Code Header***'):
                     i+=6
             elif i>lim:
-            	print('Did not find end of header for',file_path)
-            	break
+                print('Did not find end of header for',file_path)
+                break
     return i
 
 
@@ -530,15 +709,15 @@ def import_metadata_PXI(filepath,header_lines=13, version=1):
             if 'Samples' in text:
                 meta['nsample'] = [int(x) for x in text.strip('Samples').strip('\t').split('\t')][0]
             if 'Time\t' in text:
-            	if Time_Read == 1:
-            		H_M_S = text.strip('Time\t').split('\t')[0].split(':')
-            		hours_in_sec = float(H_M_S[0])*60*60
-            		min_in_sec = float(H_M_S[1])*60
-            		sec = float(H_M_S[2])
-            		meta['trigtime'] = hours_in_sec+min_in_sec+sec
-            		Time_Read+=1
-            	else:
-            		Time_Read+=1
+                if Time_Read == 1:
+                    H_M_S = text.strip('Time\t').split('\t')[0].split(':')
+                    hours_in_sec = float(H_M_S[0])*60*60
+                    min_in_sec = float(H_M_S[1])*60
+                    sec = float(H_M_S[2])
+                    meta['trigtime'] = hours_in_sec+min_in_sec+sec
+                    Time_Read+=1
+                else:
+                    Time_Read+=1
             if 'Delta_X' in text:
                 meta['dt'] = [float(x) for x in text.strip('Delta_X').strip('\t').split('\t')][0]*1000
             if 'X0' in text:
@@ -609,7 +788,7 @@ def import_metadata_PXI(filepath,header_lines=13, version=1):
             lines=[]
             for i in range(header_lines):
                 lines.append(f.readline())
-        meta_code = ''.join(lines[1:-8])
+        meta_code = ''.join(lines[1:-7])
         ldict={}
         exec(meta_code,globals(),ldict)
         meta = ldict['meta_dict']
@@ -853,15 +1032,14 @@ def gen_filepath_from_parent(path):
 
 
 def find_last_file(folder_path,file_name,initial=1):
-    found = False
+    found_end = False
     n = 0
-    while not found:
-        try:
-            file= open(gen_data_filepath(folder_path,n+initial,file_name))
-            file.close()
+    while not found_end:
+        file_path = pathlib.Path(gen_data_filepath(folder_path,n+initial,file_name))
+        if file_path.is_file():
             n+=1
-        except FileNotFoundError:
-            break
+        else:
+            found_end = True
     return n
 
 def extract_cavity(metadata):

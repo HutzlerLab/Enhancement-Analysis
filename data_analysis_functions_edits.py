@@ -59,7 +59,7 @@ def slice_integrate(data,metadata,start_stop,plot,fig_num):
             plt.plot(time_ms[t],data[t])
     return integrated
 
-def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=1500,fluor_filter=2000,avg=0,version=1):
+def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smooth=False,abs_filter=1500,fluor_filter=2000,avg=0,version=1,avg_cycle=False):
     '''This function is used to convert a series of raw data files to
     processed data traces. The raw data can be in the form of absorption
     data, or fluorescence data.
@@ -81,10 +81,8 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     Each element in data_array and parameter_array correspond to the traces and
     metadata obtained from a single file.
     '''
-
+    # read_indices = handle_averaging(file_numbers,avg,folder_path,num,file_name,avg_cycle)
     pool = mp.Pool(mp.cpu_count())
-    param_array = [[] for _ in range(len(file_numbers))]
-    data_array = [[] for _ in range(len(file_numbers))]
     last = file_numbers[-1]
     worker = partial(mp_process_single_data_file,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,last = last,version=version)
     results = pool.starmap(worker, [(i,file_numbers,avg,folder_path, num, file_name, channel_types) for i,num in enumerate(file_numbers)])
@@ -105,15 +103,52 @@ def process_raw_data_array(folder_path,file_numbers,file_name,channel_types,smoo
     # param_array = np.array(param_array)
     return [data_array,param_array]
 
+def handle_averaging(file_numbers,avg,folder_path,num,file_name,avg_cycle):
+    if (avg == 0 or avg == 1) and avg_cycle == False:
+        return file_numbers
+    elif avg>1 and avg_cycle == False:
+        cmd_files = []
+        i0 = file_numbers[0]
+        params_0 = read_raw_file(folder_path,i0,file_name,DAQ=DAQ,version=version,meta_only=True)
+        #Need to find out how many command files there are. If no averaging we can just step through. If there is averaging we have to be careful with stepping
+        #total reps tells us how many averages the DAQ took. So if no averaging, total reps = 1, if averaging, total reps > 1
+        total_reps = params_0['total repetition']
+        cmd_files.append(params_0['command file'])
+        repeat_cmd = False
+        i=total_reps
+        while repeat_cmd==False:
+            _params = read_raw_file(folder_path,i0+i,file_name,DAQ=DAQ,version=version,meta_only=True)
+            if _params['command file'] in cmd_files:
+                repeat_cmd = True
+            else:
+                cmd_files.append(_params['command file'])
+                i+=total_reps
+        #Now we find all the data files associated with each cmd file
+        pool = mp.Pool(mp.cpu_count())
+        worker = mp_sort_cmd_files(folder_path,num,file_name,cmd_files,DAQ=DAQ, verison=version)
 
-def mp_process_single_data_file(i,file_numbers,avg,folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,n_cmd = 2,last=None,version=2):
-    if avg == 0:
+
+def mp_sort_cmd_files(folder_path, num, file_name, cmd_files, DAQ='PXI', version=4):
+    params = read_raw_file(folder_path,num, file_name, DAQ=DAQ, version = version, meta_only=True)
+    return [num,params['command file']]
+
+
+def mp_handle_averaging(i,file_numbers,avg,folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,n_cmd = 2,last=None,version=2,avg_cycle=False):
+    if (avg == 0 or avg==1) and avg_cycle == False:
+        processed_data, params = process_single_data_file(folder_path, file_num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version,avg_cycle=False)
+
+    elif avg>1 and avg_cycle == False:
+
+
+def mp_process_single_data_file(i,file_numbers,avg,folder_path, file_num, file_name, channel_types, DAQ='PXI',plot=False,smooth=False,abs_filter=900,fluor_filter=1000,n_cmd = 2,last=None,version=2,avg_cycle=False):
+    if avg == 0 and avg_cycle == False:
         avg_files = 1
-    # elif i > len(file_numbers) - avg:
-    #     avg_files = len(file_numbers)-i
-    else:
+    elif i > len(file_numbers) - avg:
+        avg_files = len(file_numbers)-i
+    elif avg_cycle==False:
         avg_files=avg
-    processed_data, params = process_single_data_file(folder_path, file_num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version)
+
+    processed_data, params = process_single_data_file(folder_path, file_num, file_name, channel_types,smooth=smooth,abs_filter=abs_filter,fluor_filter=fluor_filter,avg_files=avg_files,last = last,version=version,avg_cycle=False)
     return np.array([processed_data,params])
 
 
@@ -136,7 +171,7 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
     Same order as channel_types.
     params: metadata associated with the data file.
     '''
-    if avg_files==1:
+    if avg_files==1 and avg_cycle==False:
         raw_traces, params = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
     else:
         raw = [[] for _ in range(avg_files)]
@@ -146,7 +181,7 @@ def process_single_data_file(folder_path, file_num, file_name, channel_types, DA
         timeout_index = 0
         raw[0],params[0] = read_raw_file(folder_path,file_num,file_name,DAQ=DAQ,version=version)
         wave = params[0]['command file']
-        cycle = params[0]['cycle number']
+        cycle = params[0]['cycle']
         while avg_index < avg_files:
         	if file_index+file_num > last:
         		raw = raw[:avg_index]
@@ -430,7 +465,7 @@ def raw2OD(raw_data,time_ms):
         OD = np.log(offset/smoothed_data)
     return OD
 
-def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=False):
+def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=False,meta_only=False):
     '''From a single folder location, obtain dataset with raw data and metadata.
     For full info, see documentation of process_single_data_file().
     '''
@@ -441,12 +476,16 @@ def read_raw_file(folder_path,num,file_name,DAQ='PXI',version = 1,print_bool=Fal
     if DAQ == 'PXI':
         header_lines = how_big_header(file_path,version=version)
         meta = import_metadata_PXI(file_path,header_lines=header_lines,version=version)
-        raw = import_raw_data_PXI(file_path,header_lines=header_lines,version=version)
-        meta['channels'],meta['nsample'] = raw.shape
+        if meta_only:
+            return meta
+        else:
+            raw = import_raw_data_PXI(file_path,header_lines=header_lines,version=version)
+            meta['channels'],meta['nsample'] = raw.shape
+            return [raw,meta]
     elif DAQ == 'Cleverscope':
         meta = import_metadata_Cleverscope(file_path)
         raw = import_raw_data_Cleverscope(filepath)
-    return [raw,meta]
+        return [raw,meta]
 
 def how_big_header(file_path,version=1,lim=1000):
     if version==3:

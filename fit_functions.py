@@ -188,7 +188,7 @@ def fitGaussian(xscale, data,guess=[100,0,0.16,0],sigma=None,plot=True,verbose=F
         print('\n')
         print('Fit error = ',error)
         print('FIT PARAMS = ',params)
-        print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
+        print('Mean = {} +/- {}, StDev = {} +/- {}'.format(params[1],error[1],params[0],error[0]))
     return [params,error,residuals]
 
 def fitGaussianLinBG(xscale, data,guess=[100,0,0.16,0,0],sigma=None,plot=True,verbose=False):
@@ -198,7 +198,7 @@ def fitGaussianLinBG(xscale, data,guess=[100,0,0.16,0,0],sigma=None,plot=True,ve
         print('\n')
         print('Fit error = ',error)
         print('FIT PARAMS = ',params)
-        print('Mean = {} +/- {} MHz, StDev = {} +/- {} MHz'.format(params[1],error[1],params[0],error[0]))
+        print('Mean = {} +/- {}, StDev = {} +/- {}'.format(params[1],error[1],params[0],error[0]))
     return [params,error,residuals]
 
 
